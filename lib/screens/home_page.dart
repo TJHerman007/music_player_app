@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
@@ -80,7 +81,11 @@ class _HomePageState extends State<HomePage> {
 
     return Scaffold(
       extendBody: true,
-      appBar: AppBar(title: const Text('My Music')),
+      appBar: AppBar(
+        title: const Text('My Music'),
+        backgroundColor: const Color.fromARGB(0, 51, 63, 68),
+        elevation: 0,
+      ),
       drawer: _AppDrawer(
         themeProvider: widget.themeProvider,
         audioLibrary: widget.audioLibrary,
@@ -186,12 +191,8 @@ class _AppDrawer extends StatelessWidget {
                       ?.copyWith(fontWeight: FontWeight.w800),
                 ),
               ),
-              ListTile(
-                leading: const Icon(Icons.arrow_back_rounded),
-                title: const Text('Back'),
-                onTap: () => Navigator.pop(context),
-              ),
-              const Divider(height: 1),
+
+              SizedBox(height: 8),
               ListTile(
                 leading: Icon(Icons.home_outlined),
                 title: Text('Home'),
@@ -262,19 +263,6 @@ class _AppDrawer extends StatelessWidget {
                   );
                 },
               ),
-              const Divider(),
-              ListTile(
-                leading: Icon(
-                  themeProvider.isDarkMode
-                      ? Icons.dark_mode_rounded
-                      : Icons.light_mode_rounded,
-                ),
-                title: const Text('Dark mode'),
-                trailing: Switch(
-                  value: themeProvider.isDarkMode,
-                  onChanged: themeProvider.toggleTheme,
-                ),
-              ),
             ],
           ),
         ),
@@ -321,15 +309,58 @@ class _HomeTrackTile extends StatelessWidget {
               ),
               onPressed: () => controller.toggleFavorite(track),
             ),
-            IconButton(
-              tooltip: 'Play',
-              icon: const Icon(Icons.play_arrow_rounded),
-              onPressed: () =>
-                  controller.playTrack(track, source: TrackSource.library),
-            ),
+            Icon(Icons.play_arrow_rounded),
           ],
         ),
+        onTap: () => controller.playTrack(track, source: TrackSource.library),
       ),
     );
   }
 }
+
+// //check for album art
+// class AlbumArtWidget extends StatelessWidget {
+//   final String filePath;
+
+//   const AlbumArtWidget({super.key, required this.filePath});
+
+//   @override
+//   Widget build(BuildContext context) {
+//     return FutureBuilder<Uint8List?>(
+//       // Call the plugin to extract the album image bytes
+//       future: AudioInfo.getAudioImage(filePath),
+//       builder: (context, snapshot) {
+//         // 1. Show a loading spinner while fetching the art
+//         if (snapshot.connectionState == ConnectionState.waiting) {
+//           return const Center(child: CircularProgressIndicator());
+//         }
+
+//         // 2. Render the album art if the byte array is found
+//         if (snapshot.hasData &&
+//             snapshot.data != null &&
+//             snapshot.data!.isNotEmpty) {
+//           return ClipRRect(
+//             borderRadius: BorderRadius.circular(12),
+//             child: Image.memory(
+//               snapshot.data!,
+//               width: 300,
+//               height: 300,
+//               fit: BoxFit.cover,
+//             ),
+//           );
+//         }
+
+//         // 3. Fallback placeholder if no album art is embedded
+//         return Container(
+//           width: 300,
+//           height: 300,
+//           decoration: BoxDecoration(
+//             color: Colors.grey[300],
+//             borderRadius: BorderRadius.circular(12),
+//           ),
+//           child: const Icon(Icons.music_note, size: 80, color: Colors.white),
+//         );
+//       },
+//     );
+//   }
+// }

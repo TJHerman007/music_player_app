@@ -70,7 +70,7 @@ class LiquidGlassSurface extends StatelessWidget {
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withValues(alpha: isDark ? 0.22 : 0.1),
-                blurRadius: 26,
+                blurRadius: 10,
                 offset: const Offset(8, 0),
               ),
             ],
