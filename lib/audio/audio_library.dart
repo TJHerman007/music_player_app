@@ -11,7 +11,7 @@ class AudioTrack {
   final String path;
 }
 
-enum TrackSource { library, likedSongs, playlist }
+enum TrackSource { library, likedSongs, playlist, allSongs }
 
 enum AudioRepeatMode { off, all, one }
 
@@ -35,6 +35,7 @@ class AudioLibraryController extends ChangeNotifier {
   String? errorMessage;
 
   bool get isPlaying => player.playing;
+  bool get nowPlaying => player.playing && currentTrack != null;
 
   bool isFavorite(AudioTrack track) => _favoritePaths.contains(track.path);
 

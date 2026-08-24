@@ -27,7 +27,7 @@ class GlassSurface extends StatelessWidget {
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: surfaceColor,
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(30),
             border: Border.all(color: highlightColor, width: 1.2),
             boxShadow: [
               BoxShadow(
@@ -81,7 +81,7 @@ class LiquidGlassSurface extends StatelessWidget {
               selectedColor: Theme.of(context).colorScheme.primary,
               selectedTileColor: selectedOverlay,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(30),
               ),
               child: child,
             ),

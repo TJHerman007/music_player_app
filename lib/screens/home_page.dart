@@ -80,11 +80,12 @@ class _HomePageState extends State<HomePage> {
         : 'Good evening';
 
     return Scaffold(
-      extendBody: true,
+      extendBody: false,
       appBar: AppBar(
         title: const Text('My Music'),
-        backgroundColor: const Color.fromARGB(0, 51, 63, 68),
+        backgroundColor: Colors.transparent,
         elevation: 0,
+        forceMaterialTransparency: true,
       ),
       drawer: _AppDrawer(
         themeProvider: widget.themeProvider,
@@ -290,29 +291,56 @@ class _HomeTrackTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-        leading: const Icon(Icons.music_note_rounded),
-        title: Text(track.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              tooltip: controller.isFavorite(track)
-                  ? 'Remove from favorites'
-                  : 'Add to favorites',
-              icon: Icon(
-                controller.isFavorite(track)
-                    ? Icons.favorite_rounded
-                    : Icons.favorite_border_rounded,
-                color: controller.isFavorite(track) ? Colors.pinkAccent : null,
-              ),
-              onPressed: () => controller.toggleFavorite(track),
+      child: GlassSurface(
+        child: InkWell(
+          splashColor: Colors.deepPurple,
+          highlightColor: Colors.blueAccent,
+          child: AnimatedContainer(
+            decoration: BoxDecoration(
+              color: controller.currentTrack == track
+                  ? Theme.of(context).colorScheme.primary.withOpacity(0.5)
+                  : Theme.of(context).colorScheme.primary.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(30),
             ),
-            Icon(Icons.play_arrow_rounded),
-          ],
+            duration: Duration(milliseconds: 200),
+            curve: Curves.easeInOut,
+
+            child: ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 15),
+              leading: const Icon(Icons.music_note_rounded),
+              title: Text(
+                track.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    tooltip: controller.isFavorite(track)
+                        ? 'Remove from favorites'
+                        : 'Add to favorites',
+                    icon: Icon(
+                      controller.isFavorite(track)
+                          ? Icons.favorite_rounded
+                          : Icons.favorite_border_rounded,
+                      color: controller.isFavorite(track)
+                          ? Colors.pinkAccent
+                          : null,
+                    ),
+                    onPressed: () => controller.toggleFavorite(track),
+                  ),
+                  Icon(
+                    controller.nowPlaying
+                        ? Icons.multitrack_audio_rounded
+                        : Icons.play_arrow_rounded,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          onTap: () => controller.playTrack(track, source: TrackSource.library),
         ),
-        onTap: () => controller.playTrack(track, source: TrackSource.library),
       ),
     );
   }
