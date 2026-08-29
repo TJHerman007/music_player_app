@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 class AppTheme {
   static const _lightSeed = Color.fromARGB(255, 219, 142, 255);
-  static const _darkSeed = Color.fromARGB(255, 108, 45, 138);
+  static const _darkSeed = Color(0xFFE46F50);
 
   /// Blends [base] toward [accent] by [t], or returns [base] unchanged when
   /// there is no now-playing accent to blend with.

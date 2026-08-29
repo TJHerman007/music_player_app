@@ -13,6 +13,7 @@ import 'package:media_metadata/media_metadata.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:share_plus/share_plus.dart';
 
 Map<String, dynamic>? _decodeState(String rawState) {
   final decoded = jsonDecode(rawState);
@@ -21,10 +22,31 @@ Map<String, dynamic>? _decodeState(String rawState) {
 }
 
 class AudioTrack {
-  const AudioTrack({required this.name, required this.path});
+  const AudioTrack({
+    required this.name,
+    required this.path,
+    this.artist = 'Unknown',
+    this.album = 'Unknown album',
+  });
 
   final String name;
   final String path;
+  final String artist;
+  final String album;
+
+  AudioTrack copyWith({
+    String? name,
+    String? path,
+    String? artist,
+    String? album,
+  }) {
+    return AudioTrack(
+      name: name ?? this.name,
+      path: path ?? this.path,
+      artist: artist ?? this.artist,
+      album: album ?? this.album,
+    );
+  }
 }
 
 class AudioPlaylist {
@@ -89,6 +111,9 @@ class AudioLibraryController extends ChangeNotifier {
   Timer? _persistDebounce;
   final Map<String, Future<Uint8List?>> _artworkRequests = {};
   Map<String, List<ArtistGroup>>? _artistCategoryCache;
+  Map<String, List<AlbumGroup>>? _albumCategoryCache;
+  bool _metadataScanRunning = false;
+  int _metadataScanned = 0;
   static const MethodChannel _deviceAudioChannel = MethodChannel(
     'music_player/device_audio',
   );
@@ -175,6 +200,8 @@ class AudioLibraryController extends ChangeNotifier {
       }
     }
     _artistCategoryCache = null;
+    _albumCategoryCache = null;
+    _albumCategoryCache = null;
     if (currentTrack?.path == track.path) {
       player.stop();
       currentTrack = null;
@@ -309,6 +336,207 @@ class AudioLibraryController extends ChangeNotifier {
   /// The existing library is restored from SharedPreferences at startup, so
   /// this scan only needs to be run when the user explicitly refreshes the
   /// library (or when the app wants to discover newly added files).
+  static String _cleanArtist(dynamic value) {
+    final text = value?.toString().trim();
+    return text == null || text.isEmpty ? 'Unknown' : text;
+  }
+
+  static String _cleanAlbum(dynamic value) {
+    final text = value?.toString().trim();
+    return text == null || text.isEmpty ? 'Unknown album' : text;
+  }
+
+  bool get isMetadataScanRunning => _metadataScanRunning;
+
+  int get metadataScannedCount => _metadataScanned;
+
+  /// Reads artist/album metadata for tracks that still need it.
+  ///
+  /// This is deliberately throttled:
+  /// - maximum 2 metadata reads at once
+  /// - no rebuild for every track
+  /// - yields to Flutter between batches
+  /// - skips tracks that already have both fields
+  ///
+  /// It is safe to run after the normal library scan without blocking
+  /// navigation, scrolling, or playback.
+
+  /// Reads embedded artist/album metadata in very small batches.
+  ///
+  /// This is intentionally separate from scanDeviceMusic().
+  /// The normal library scan remains unchanged.
+  /// One-button scan:
+  /// 1. Run the existing fast device scan.
+  /// 2. Start metadata enrichment separately without blocking the UI.
+  Future<bool> scanDeviceMusicSmooth() async {
+    final success = await scanDeviceMusic();
+
+    if (success) {
+      unawaited(scanArtistAndAlbumMetadata());
+    }
+
+    return success;
+  }
+
+  Future<void> scanArtistAndAlbumMetadata({int batchSize = 2}) async {
+    if (_metadataScanRunning || tracks.isEmpty) {
+      return;
+    }
+
+    _metadataScanRunning = true;
+
+    try {
+      for (var start = 0; start < tracks.length; start += batchSize) {
+        final end = (start + batchSize > tracks.length)
+            ? tracks.length
+            : start + batchSize;
+
+        for (var index = start; index < end; index++) {
+          final originalTrack = tracks[index];
+
+          try {
+            String path = originalTrack.path;
+
+            // MediaStore songs use content:// URIs.
+            // Resolve only when the metadata scan is explicitly triggered.
+            if (path.startsWith('content://')) {
+              final resolved = await _deviceAudioChannel.invokeMethod<String>(
+                'resolveAudio',
+                {'uri': path},
+              );
+
+              if (resolved == null || resolved.trim().isEmpty) {
+                continue;
+              }
+
+              path = resolved;
+            }
+
+            final metadata = await MediaMetadata.read(path);
+
+            if (metadata == null) {
+              continue;
+            }
+
+            final String? metadataArtist = metadata.artist?.trim();
+
+            final String? metadataAlbumArtist = metadata.albumArtist?.trim();
+
+            final String? metadataAlbum = metadata.album?.trim();
+
+            final String artist =
+                metadataArtist != null && metadataArtist.isNotEmpty
+                ? metadataArtist
+                : metadataAlbumArtist != null && metadataAlbumArtist.isNotEmpty
+                ? metadataAlbumArtist
+                : 'Unknown';
+
+            final String album =
+                metadataAlbum != null && metadataAlbum.isNotEmpty
+                ? metadataAlbum
+                : 'Unknown album';
+
+            final String title =
+                metadata.title != null && metadata.title!.trim().isNotEmpty
+                ? metadata.title!.trim()
+                : originalTrack.name;
+
+            tracks[index] = AudioTrack(
+              name: title,
+              path: originalTrack.path,
+              artist: artist,
+              album: album,
+            );
+          } catch (error) {
+            debugPrint(
+              'Metadata error for '
+              '${originalTrack.name}: $error',
+            );
+          }
+        }
+
+        _artistCategoryCache = null;
+        _albumCategoryCache = null;
+
+        // Refresh the UI after each tiny batch.
+        notifyListeners();
+
+        // Give Flutter a chance to render, animate,
+        // scroll and process navigation.
+        await Future<void>.delayed(const Duration(milliseconds: 16));
+      }
+
+      _schedulePersist();
+    } finally {
+      _metadataScanRunning = false;
+    }
+  }
+
+  Future<void> _readMetadataForTrack(AudioTrack original) async {
+    try {
+      String? artist;
+      String? album;
+
+      if (original.path.startsWith('content://')) {
+        final metadata = await _deviceAudioChannel
+            .invokeMethod<Map<dynamic, dynamic>>('readMetadata', {
+              'uri': original.path,
+            });
+
+        if (metadata != null) {
+          final nativeArtist = metadata['artist']?.toString().trim();
+          final nativeAlbumArtist = metadata['albumArtist']?.toString().trim();
+          final nativeAlbum = metadata['album']?.toString().trim();
+
+          if (nativeArtist != null && nativeArtist.isNotEmpty) {
+            artist = nativeArtist;
+          } else if (nativeAlbumArtist != null &&
+              nativeAlbumArtist.isNotEmpty) {
+            artist = nativeAlbumArtist;
+          }
+
+          if (nativeAlbum != null && nativeAlbum.isNotEmpty) {
+            album = nativeAlbum;
+          }
+        }
+      } else {
+        final metadata = await MediaMetadata.read(original.path);
+
+        final metadataArtist = metadata?.artist?.trim();
+        final metadataAlbumArtist = metadata?.albumArtist?.trim();
+        final metadataAlbum = metadata?.album?.trim();
+
+        if (metadataArtist != null && metadataArtist.isNotEmpty) {
+          artist = metadataArtist;
+        } else if (metadataAlbumArtist != null &&
+            metadataAlbumArtist.isNotEmpty) {
+          artist = metadataAlbumArtist;
+        }
+
+        if (metadataAlbum != null && metadataAlbum.isNotEmpty) {
+          album = metadataAlbum;
+        }
+      }
+
+      if (artist == null && album == null) {
+        return;
+      }
+
+      final index = tracks.indexWhere((track) => track.path == original.path);
+
+      if (index < 0) return;
+
+      final current = tracks[index];
+
+      tracks[index] = current.copyWith(
+        artist: artist ?? current.artist,
+        album: album ?? current.album,
+      );
+    } catch (_) {
+      // Metadata is optional. Never let one bad file stop the scan.
+    }
+  }
+
   Future<bool> scanDeviceMusic() async {
     if (defaultTargetPlatform != TargetPlatform.android) return false;
     if (isBusy) return false;
@@ -339,6 +567,8 @@ class AudioLibraryController extends ChangeNotifier {
       const batchSize = 32;
       final result = songs ?? const <dynamic>[];
       _artistCategoryCache = null;
+      _albumCategoryCache = null;
+      _albumCategoryCache = null;
 
       for (var i = 0; i < result.length; i++) {
         final item = result[i];
@@ -347,6 +577,12 @@ class AudioLibraryController extends ChangeNotifier {
           final song = Map<String, dynamic>.from(item);
           final path = song['path'] as String?;
           final title = song['title'] as String? ?? 'Unknown track';
+
+          final artist = _cleanArtist(song['artist']?.toString());
+          final albumArtist = _cleanArtist(song['albumArtist']?.toString());
+          final album = _cleanAlbum(song['album']?.toString());
+
+          final resolvedArtist = artist != 'Unknown' ? artist : albumArtist;
 
           if (path != null &&
               path.isNotEmpty &&
@@ -360,10 +596,18 @@ class AudioLibraryController extends ChangeNotifier {
                         !track.path.startsWith('content://'),
                   )
                 : -1;
+
+            final updatedTrack = AudioTrack(
+              name: title,
+              path: path,
+              artist: resolvedArtist,
+              album: album,
+            );
+
             if (oldPathIndex >= 0) {
-              tracks[oldPathIndex] = AudioTrack(name: title, path: path);
+              tracks[oldPathIndex] = updatedTrack;
             } else {
-              pending.add(AudioTrack(name: title, path: path));
+              pending.add(updatedTrack);
             }
           }
         }
@@ -446,6 +690,8 @@ class AudioLibraryController extends ChangeNotifier {
         }
       }
       _artistCategoryCache = null;
+      _albumCategoryCache = null;
+      _albumCategoryCache = null;
       _schedulePersist();
       return true;
     } catch (_) {
@@ -476,6 +722,99 @@ class AudioLibraryController extends ChangeNotifier {
       notifyListeners();
       return false;
     }
+  }
+
+  /// Shares the actual audio file, not just its path.
+  ///
+  /// For Android MediaStore tracks (`content://...`), the existing native
+  /// `resolveAudio` method is used only when the user explicitly presses
+  /// Share. This is intentionally NOT part of scanning, so library scanning
+  /// remains unchanged and fast.
+  Future<void> shareTrack(AudioTrack track) async {
+    try {
+      String filePath = track.path;
+
+      if (filePath.startsWith('content://')) {
+        try {
+          final resolved = await _deviceAudioChannel.invokeMethod<String>(
+            'resolveAudio',
+            {'uri': track.path},
+          );
+
+          if (resolved != null && resolved.isNotEmpty) {
+            filePath = resolved;
+          }
+        } on MissingPluginException {
+          // Fall through. Some platforms may be able to share the URI
+          // directly through XFile.
+        }
+      }
+
+      final file = XFile(
+        filePath,
+        name: _shareFileName(track),
+        mimeType: _shareMimeType(filePath),
+      );
+
+      await SharePlus.instance.share(
+        ShareParams(
+          title: track.name,
+          text: track.artist.trim().isEmpty || track.artist == 'Unknown'
+              ? track.name
+              : '${track.name} — ${track.artist}',
+          files: <XFile>[file],
+        ),
+      );
+    } catch (error, stackTrace) {
+      debugPrint('Could not share ${track.path}: $error');
+      debugPrintStack(stackTrace: stackTrace);
+
+      errorMessage = 'This audio file could not be shared.';
+      notifyListeners();
+    }
+  }
+
+  String _shareFileName(AudioTrack track) {
+    final extension = _audioExtension(track.path);
+
+    final baseName = track.name
+        .replaceAll(RegExp(r'[<>:"/\\\\|?*]'), '_')
+        .trim();
+
+    final safeName = baseName.isEmpty ? 'audio' : baseName;
+
+    return extension.isEmpty ? safeName : '$safeName.$extension';
+  }
+
+  String _shareMimeType(String path) {
+    final extension = _audioExtension(path);
+
+    switch (extension) {
+      case 'mp3':
+        return 'audio/mpeg';
+      case 'wav':
+        return 'audio/wav';
+      case 'flac':
+        return 'audio/flac';
+      case 'm4a':
+        return 'audio/mp4';
+      default:
+        return 'audio/*';
+    }
+  }
+
+  String _audioExtension(String path) {
+    final cleanPath = path.split('?').first;
+
+    final lastPart = cleanPath.split('/').last;
+
+    final dot = lastPart.lastIndexOf('.');
+
+    if (dot < 0 || dot == lastPart.length - 1) {
+      return '';
+    }
+
+    return lastPart.substring(dot + 1).toLowerCase();
   }
 
   Future<void> playTrack(
@@ -570,6 +909,8 @@ class AudioLibraryController extends ChangeNotifier {
   void _applyFilters() {
     tracks.removeWhere((track) => !_isAllowedAudio(track.path));
     _artistCategoryCache = null;
+    _albumCategoryCache = null;
+    _albumCategoryCache = null;
     if (currentTrack != null && !_isAllowedAudio(currentTrack!.path)) {
       player.stop();
       currentTrack = null;
@@ -600,6 +941,8 @@ class AudioLibraryController extends ChangeNotifier {
             (track) => AudioTrack(
               name: track['name'] as String? ?? 'Unknown track',
               path: track['path'] as String? ?? '',
+              artist: _cleanArtist(track['artist']),
+              album: _cleanAlbum(track['album']),
             ),
           )
           .where((track) => track.path.isNotEmpty)
@@ -674,7 +1017,14 @@ class AudioLibraryController extends ChangeNotifier {
 
     final snapshot = jsonEncode({
       'tracks': tracks
-          .map((track) => {'name': track.name, 'path': track.path})
+          .map(
+            (track) => {
+              'name': track.name,
+              'path': track.path,
+              'artist': track.artist,
+              'album': track.album,
+            },
+          )
           .toList(growable: false),
       'favoritePaths': _favoritePaths.toList(growable: false),
       'excludedExtensions': excludedExtensions.toList(growable: false),
@@ -763,9 +1113,14 @@ class AudioLibraryController extends ChangeNotifier {
       // A cover that cannot be decoded simply leaves the theme unchanged.
     }
   }
+
+  Future<void> pauseTrack() async {}
 }
 
-/// Extended data class representing an artist group
+// ============================================================================
+// ARTIST / ALBUM CATEGORIZATION
+// ============================================================================
+
 class ArtistGroup {
   const ArtistGroup({required this.artistName, required this.tracks});
 
@@ -774,80 +1129,184 @@ class ArtistGroup {
 
   int get trackCount => tracks.length;
 
-  /// Returns the alphabetical header section (A-Z or #)
   String get sectionHeader {
-    if (artistName.isEmpty) return '#';
-    final char = artistName[0].toUpperCase();
-    return RegExp(r'[A-Z]').hasMatch(char) ? char : '#';
+    final value = artistName.trim();
+    if (value.isEmpty) return '#';
+
+    final first = value[0].toUpperCase();
+    return RegExp(r'[A-Z]').hasMatch(first) ? first : '#';
   }
 }
 
+class AlbumGroup {
+  const AlbumGroup({required this.albumName, required this.tracks});
+
+  final String albumName;
+  final List<AudioTrack> tracks;
+
+  int get trackCount => tracks.length;
+
+  String get sectionHeader {
+    final value = albumName.trim();
+    if (value.isEmpty) return '#';
+
+    final first = value[0].toUpperCase();
+    return RegExp(r'[A-Z]').hasMatch(first) ? first : '#';
+  }
+}
+
+String _categoryKey(String value) {
+  return value.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+}
+
 extension ArtistCategorization on AudioLibraryController {
-  /// Extracts, groups, and categorizes tracks by artist alphabetically (A-Z, #)
   Map<String, List<ArtistGroup>> getCategorizedArtists() {
     final cached = _artistCategoryCache;
     if (cached != null) return cached;
 
-    final Map<String, List<AudioTrack>> artistToTracks = {};
+    final grouped = <String, List<AudioTrack>>{};
+    final displayNames = <String, String>{};
 
     for (final track in tracks) {
-      // Infers artist name from file name or path if not explicit
-      final artistName = _extractArtistName(track);
-      artistToTracks.putIfAbsent(artistName, () => []).add(track);
+      final artist = track.artist.trim().isEmpty
+          ? 'Unknown'
+          : track.artist.trim();
+
+      final key = _categoryKey(artist);
+      displayNames.putIfAbsent(key, () => artist);
+      grouped.putIfAbsent(key, () => <AudioTrack>[]).add(track);
     }
 
-    final List<ArtistGroup> groups = artistToTracks.entries
-        .map(
-          (entry) => ArtistGroup(
-            artistName: entry.key,
-            tracks: List.unmodifiable(entry.value),
-          ),
-        )
-        .toList();
+    final categorized = <String, List<ArtistGroup>>{};
 
-    final Map<String, List<ArtistGroup>> categorized = {};
+    for (final entry in grouped.entries) {
+      final group = ArtistGroup(
+        artistName: displayNames[entry.key]!,
+        tracks: List.unmodifiable(entry.value),
+      );
 
-    for (final group in groups) {
-      final header = group.sectionHeader;
-      categorized.putIfAbsent(header, () => []).add(group);
+      categorized
+          .putIfAbsent(group.sectionHeader, () => <ArtistGroup>[])
+          .add(group);
     }
 
-    // Sort categories (A-Z, with # placed at the end)
-    final sortedKeys = categorized.keys.toList()
+    final keys = categorized.keys.toList()
       ..sort((a, b) {
         if (a == '#') return 1;
         if (b == '#') return -1;
         return a.compareTo(b);
       });
 
-    final Map<String, List<ArtistGroup>> result = {};
-    for (final key in sortedKeys) {
-      final artistList = categorized[key]!;
-      artistList.sort(
+    final result = <String, List<ArtistGroup>>{};
+
+    for (final key in keys) {
+      final list = categorized[key]!;
+      list.sort(
         (a, b) =>
             a.artistName.toLowerCase().compareTo(b.artistName.toLowerCase()),
       );
-      result[key] = artistList;
+      result[key] = List.unmodifiable(list);
     }
 
-    final cachedResult = Map<String, List<ArtistGroup>>.unmodifiable(
-      result.map(
-        (key, value) => MapEntry(key, List<ArtistGroup>.unmodifiable(value)),
-      ),
-    );
+    final immutable = Map<String, List<ArtistGroup>>.unmodifiable(result);
 
-    _artistCategoryCache = cachedResult;
-    return cachedResult;
+    _artistCategoryCache = immutable;
+    return immutable;
   }
 
-  /// Helper method to extract artist names from "Artist - Title.mp3" formats
-  String _extractArtistName(AudioTrack track) {
-    if (track.name.contains(' - ')) {
-      final parts = track.name.split(' - ');
-      if (parts[0].trim().isNotEmpty) {
-        return parts[0].trim();
-      }
+  Map<String, List<AlbumGroup>> getCategorizedAlbums() {
+    final cached = _albumCategoryCache;
+    if (cached != null) return cached;
+
+    final grouped = <String, List<AudioTrack>>{};
+    final displayNames = <String, String>{};
+
+    for (final track in tracks) {
+      final album = track.album.trim().isEmpty
+          ? 'Unknown album'
+          : track.album.trim();
+
+      final key = _categoryKey(album);
+      displayNames.putIfAbsent(key, () => album);
+      grouped.putIfAbsent(key, () => <AudioTrack>[]).add(track);
     }
-    return 'Unknown Artist';
+
+    final categorized = <String, List<AlbumGroup>>{};
+
+    for (final entry in grouped.entries) {
+      final group = AlbumGroup(
+        albumName: displayNames[entry.key]!,
+        tracks: List.unmodifiable(entry.value),
+      );
+
+      categorized
+          .putIfAbsent(group.sectionHeader, () => <AlbumGroup>[])
+          .add(group);
+    }
+
+    final keys = categorized.keys.toList()
+      ..sort((a, b) {
+        if (a == '#') return 1;
+        if (b == '#') return -1;
+        return a.compareTo(b);
+      });
+
+    final result = <String, List<AlbumGroup>>{};
+
+    for (final key in keys) {
+      final list = categorized[key]!;
+      list.sort(
+        (a, b) =>
+            a.albumName.toLowerCase().compareTo(b.albumName.toLowerCase()),
+      );
+      result[key] = List.unmodifiable(list);
+    }
+
+    final immutable = Map<String, List<AlbumGroup>>.unmodifiable(result);
+
+    _albumCategoryCache = immutable;
+    return immutable;
+  }
+
+  List<AudioTrack> tracksForAlbum(String albumName) {
+    final key = _categoryKey(albumName);
+
+    return tracks
+        .where((track) {
+          final album = track.album.trim().isEmpty
+              ? 'Unknown album'
+              : track.album.trim();
+
+          return _categoryKey(album) == key;
+        })
+        .toList(growable: false);
+  }
+
+  List<AudioTrack> searchTracks(String query) {
+    final normalized = query.trim().toLowerCase();
+
+    if (normalized.isEmpty) {
+      return List.unmodifiable(tracks);
+    }
+
+    final words = normalized
+        .split(RegExp(r'\s+'))
+        .where((word) => word.isNotEmpty)
+        .toList(growable: false);
+
+    return tracks
+        .where((track) {
+          final title = track.name.toLowerCase();
+          final artist = track.artist.toLowerCase();
+          final album = track.album.toLowerCase();
+
+          return words.every(
+            (word) =>
+                title.contains(word) ||
+                artist.contains(word) ||
+                album.contains(word),
+          );
+        })
+        .toList(growable: false);
   }
 }

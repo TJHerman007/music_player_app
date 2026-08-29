@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:music_player_app/screens/search_page.dart';
 
 import '../audio/audio_library.dart';
 import '../theme/theme_provider.dart';
@@ -232,7 +233,7 @@ class _HomePageState extends State<HomePage> {
                               onPressed: () {
                                 Navigator.of(context).push(
                                   MaterialPageRoute(
-                                    builder: (_) => _SearchPage(
+                                    builder: (_) => SearchPage(
                                       audioLibrary: widget.audioLibrary,
                                     ),
                                   ),
@@ -839,12 +840,189 @@ class _RecentlyPlayedCard extends StatelessWidget {
 // ============================================================================
 // TRACK ROW
 // ============================================================================
-
 class _HomeTrackTile extends StatelessWidget {
   const _HomeTrackTile({required this.track, required this.controller});
 
   final AudioTrack track;
   final AudioLibraryController controller;
+
+  Future<void> _showTrackMenu(BuildContext context) async {
+    final renderObject = context.findRenderObject();
+
+    if (renderObject is! RenderBox) return;
+
+    final overlay = Overlay.of(context).context.findRenderObject();
+
+    if (overlay is! RenderBox) return;
+
+    final position = renderObject.localToGlobal(Offset.zero, ancestor: overlay);
+
+    final size = renderObject.size;
+
+    final screenSize = MediaQuery.sizeOf(context);
+
+    final menuWidth = 230.0;
+    const menuHeight = 190.0;
+
+    double left = position.dx + size.width - menuWidth;
+
+    if (left < 12) {
+      left = 12;
+    }
+
+    if (left + menuWidth > screenSize.width - 12) {
+      left = screenSize.width - menuWidth - 12;
+    }
+
+    double top = position.dy + size.height * 0.5;
+
+    // Keep the popup on screen.
+    if (top + menuHeight > screenSize.height - 20) {
+      top = screenSize.height - menuHeight - 20;
+    }
+
+    if (top < 20) {
+      top = 20;
+    }
+
+    final selected = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        left,
+        top,
+        screenSize.width - left - menuWidth,
+        screenSize.height - top - menuHeight,
+      ),
+      color: _OneMusicColors.surface(context),
+      elevation: 12,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      items: [
+        PopupMenuItem<String>(
+          value: 'playlist',
+          height: 48,
+          child: Row(
+            children: [
+              Icon(
+                Icons.playlist_add_rounded,
+                size: 20,
+                color: _OneMusicColors.textPrimary(context),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                'Add to playlist',
+                style: TextStyle(
+                  color: _OneMusicColors.textPrimary(context),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        PopupMenuItem<String>(
+          value: 'favorite',
+          height: 48,
+          child: Row(
+            children: [
+              Icon(
+                controller.isFavorite(track)
+                    ? Icons.favorite_rounded
+                    : Icons.favorite_border_rounded,
+                size: 20,
+                color: controller.isFavorite(track)
+                    ? _OneMusicColors.accent(context)
+                    : _OneMusicColors.textPrimary(context),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                controller.isFavorite(track)
+                    ? 'Remove from favorites'
+                    : 'Add to favorites',
+                style: TextStyle(
+                  color: _OneMusicColors.textPrimary(context),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        PopupMenuItem<String>(
+          value: 'play',
+          height: 48,
+          child: Row(
+            children: [
+              Icon(
+                Icons.play_arrow_rounded,
+                size: 20,
+                color: _OneMusicColors.textPrimary(context),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                'Play now',
+                style: TextStyle(
+                  color: _OneMusicColors.textPrimary(context),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        PopupMenuItem<String>(
+          value: 'remove',
+          height: 48,
+          child: Row(
+            children: [
+              Icon(
+                Icons.remove_circle_outline_rounded,
+                size: 20,
+                color: _OneMusicColors.accent(context),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                'Remove from library',
+                style: TextStyle(
+                  color: _OneMusicColors.textPrimary(context),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+
+    if (!context.mounted || selected == null) {
+      return;
+    }
+
+    switch (selected) {
+      case 'playlist':
+        await TrackActions.showPlaylistPicker(
+          context,
+          controller: controller,
+          track: track,
+        );
+        break;
+
+      case 'favorite':
+        controller.toggleFavorite(track);
+        break;
+
+      case 'play':
+        await controller.playTrack(track, source: TrackSource.library);
+        break;
+
+      case 'remove':
+        controller.removeTrack(track);
+        break;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -852,28 +1030,39 @@ class _HomeTrackTile extends StatelessWidget {
 
     final isPlaying = isSelected && controller.isPlaying;
 
+    final artist = track.artist.trim().isEmpty
+        ? 'Unknown'
+        : track.artist.trim();
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 5),
+
       child: Material(
         color: Colors.transparent,
+
         child: InkWell(
           onTap: () async {
             await controller.playTrack(track, source: TrackSource.library);
           },
+
           onLongPress: () {
-            TrackActions.show(context, controller: controller, track: track);
+            _showTrackMenu(context);
           },
+
           borderRadius: BorderRadius.circular(16),
+
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 9),
+
             child: Row(
               children: [
-                // ---------------------------------------------------------
+                // -------------------------------------------------------------
                 // ARTWORK
-                // ---------------------------------------------------------
+                // -------------------------------------------------------------
 
                 ClipRRect(
                   borderRadius: BorderRadius.circular(13),
+
                   child: TrackArtworkPreview(
                     title: track.name,
                     artwork: controller.artworkFor(track),
@@ -883,69 +1072,105 @@ class _HomeTrackTile extends StatelessWidget {
 
                 const SizedBox(width: 14),
 
-                // ---------------------------------------------------------
-                // TITLE
-                // ---------------------------------------------------------
+                // -------------------------------------------------------------
+                // TITLE + ARTIST
+                // -------------------------------------------------------------
                 Expanded(
-                  child: Text(
-                    track.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: _OneMusicColors.textPrimary(context),
-                      fontSize: 15,
-                      fontWeight: isSelected
-                          ? FontWeight.w700
-                          : FontWeight.w500,
-                      letterSpacing: -0.15,
-                      height: 1.2,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+
+                    mainAxisAlignment: MainAxisAlignment.center,
+
+                    children: [
+                      Text(
+                        track.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+
+                        style: TextStyle(
+                          color: _OneMusicColors.textPrimary(context),
+                          fontSize: 14.5,
+                          fontWeight: isSelected
+                              ? FontWeight.w700
+                              : FontWeight.w600,
+                          letterSpacing: -0.15,
+                          height: 1.15,
+                        ),
+                      ),
+
+                      const SizedBox(height: 4),
+
+                      Text(
+                        artist,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+
+                        style: TextStyle(
+                          color: _OneMusicColors.secondary(context),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          letterSpacing: -0.05,
+                          height: 1.1,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
 
                 const SizedBox(width: 8),
 
-                // ---------------------------------------------------------
+                // -------------------------------------------------------------
                 // FAVORITE
-                // ---------------------------------------------------------
+                // -------------------------------------------------------------
                 IconButton(
                   visualDensity: const VisualDensity(
                     horizontal: -1,
                     vertical: -1,
                   ),
+
                   splashRadius: 20,
+
                   tooltip: controller.isFavorite(track)
                       ? 'Remove from favorites'
                       : 'Add to favorites',
+
                   icon: Icon(
                     controller.isFavorite(track)
                         ? Icons.favorite_rounded
                         : Icons.favorite_border_rounded,
+
                     size: 19,
+
                     color: controller.isFavorite(track)
                         ? _OneMusicColors.accent(context)
                         : _OneMusicColors.muted(context),
                   ),
+
                   onPressed: () {
                     controller.toggleFavorite(track);
                   },
                 ),
 
-                const SizedBox(width: 6),
+                const SizedBox(width: 5),
 
-                // ---------------------------------------------------------
+                // -------------------------------------------------------------
                 // PLAYING INDICATOR
-                // ---------------------------------------------------------
+                // -------------------------------------------------------------
                 SizedBox(
                   width: 30,
+
                   child: AnimatedSwitcher(
                     duration: const Duration(milliseconds: 180),
+
                     child: isPlaying
                         ? const NowPlayingIndicator(key: ValueKey('playing'))
                         : Icon(
                             Icons.play_circle_outline_rounded,
+
                             key: const ValueKey('play'),
+
                             size: 22,
+
                             color: _OneMusicColors.accent(context),
                           ),
                   ),
