@@ -44,8 +44,8 @@ class MusicVisual extends StatelessWidget {
             ),
           ),
           Container(
-            width: 108,
-            height: 108,
+            width: 90,
+            height: 90,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: const Color(0xFF24202F),
@@ -185,6 +185,130 @@ class ThreeDAlbumArt extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class TrackArtworkPreview extends StatelessWidget {
+  const TrackArtworkPreview({
+    required this.title,
+    required this.artwork,
+    this.size = 48,
+    super.key,
+  });
+
+  final String title;
+  final Future<Uint8List?> artwork;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = [
+      const Color(0xFFEF6F61),
+      const Color(0xFF56B4A8),
+      const Color(0xFF7668D8),
+      const Color(0xFFFFA54B),
+    ][title.hashCode.abs() % 4];
+
+    return FutureBuilder<Uint8List?>(
+      future: artwork,
+      builder: (context, snapshot) {
+        final imageBytes = snapshot.data;
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: SizedBox(
+            width: size,
+            height: size,
+            child: imageBytes == null
+                ? ColoredBox(
+                    color: accent,
+                    child: const Icon(Icons.album_rounded, color: Colors.white),
+                  )
+                : Image.memory(
+                    imageBytes,
+                    fit: BoxFit.cover,
+                    gaplessPlayback: true,
+                    filterQuality: FilterQuality.low,
+                  ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class FullPlayerAlbumArt extends StatelessWidget {
+  const FullPlayerAlbumArt({required this.title, this.imageBytes, super.key});
+
+  final String title;
+  final Uint8List? imageBytes;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = [
+      const Color(0xFFFF8FAB),
+      const Color(0xFFFFB86B),
+      const Color(0xFF75D6C5),
+      const Color(0xFF9C8CFF),
+    ][title.hashCode.abs() % 4];
+    return AspectRatio(
+      aspectRatio: 0.7,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: imageBytes == null
+            ? DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(colors: [accent, Colors.black87]),
+                ),
+                child: const Center(
+                  child: Icon(
+                    Icons.album_rounded,
+                    size: 88,
+                    color: Colors.white,
+                  ),
+                ),
+              )
+            : Image.memory(
+                imageBytes!,
+                fit: BoxFit.cover,
+                filterQuality: FilterQuality.medium,
+              ),
+      ),
+    );
+  }
+}
+
+class NowPlayingIndicator extends StatefulWidget {
+  const NowPlayingIndicator({super.key});
+
+  @override
+  State<NowPlayingIndicator> createState() => _NowPlayingIndicatorState();
+}
+
+class _NowPlayingIndicatorState extends State<NowPlayingIndicator>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _animation = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 700),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _animation.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ScaleTransition(
+      scale: Tween<double>(
+        begin: 0.82,
+        end: 1.08,
+      ).animate(CurvedAnimation(parent: _animation, curve: Curves.easeInOut)),
+      child: Icon(
+        Icons.graphic_eq_rounded,
+        color: Theme.of(context).colorScheme.primary,
       ),
     );
   }

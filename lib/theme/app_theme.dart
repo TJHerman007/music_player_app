@@ -1,53 +1,86 @@
 import 'package:flutter/material.dart';
 
 class AppTheme {
-  static ThemeData get light => ThemeData(
+  static const _lightSeed = Color.fromARGB(255, 219, 142, 255);
+  static const _darkSeed = Color.fromARGB(255, 108, 45, 138);
+
+  /// Blends [base] toward [accent] by [t], or returns [base] unchanged when
+  /// there is no now-playing accent to blend with.
+  static Color _blend(Color base, Color? accent, double t) {
+    if (accent == null) return base;
+    return Color.lerp(base, accent, t) ?? base;
+  }
+
+  static ThemeData light([Color? accent]) => ThemeData(
     brightness: Brightness.light,
-    colorSchemeSeed: const Color(0xFF4D8DFF),
-    scaffoldBackgroundColor: const Color(0xFFF6F8FC),
-    canvasColor: const Color(0xFFF6F8FC),
-    dividerColor: const Color(0xFFDDE4EA),
-    cardColor: const Color(0xFFFFFFFF),
+    colorScheme: ColorScheme.fromSeed(
+      seedColor: _blend(_lightSeed, accent, 0.55),
+      brightness: Brightness.light,
+      surface: _blend(const Color.fromARGB(255, 241, 231, 231), accent, 0.1),
+    ),
+    scaffoldBackgroundColor: _blend(
+      const Color.fromARGB(255, 219, 219, 219),
+      accent,
+      0.12,
+    ),
+    canvasColor: const Color.fromARGB(255, 247, 240, 240),
+    dividerColor: const Color.fromARGB(255, 235, 234, 234),
+    cardColor: const Color.fromARGB(255, 238, 238, 238),
     textTheme: const TextTheme(
-      bodyLarge: TextStyle(color: Color(0xFF1D2935)),
-      bodyMedium: TextStyle(color: Color(0xFF40505E)),
-      titleLarge: TextStyle(color: Color(0xFF17232E)),
-      titleMedium: TextStyle(color: Color(0xFF17232E)),
+      bodyLarge: TextStyle(color: Color(0xFF1D1B1A)),
+      bodyMedium: TextStyle(color: Color.fromARGB(255, 7, 7, 7)),
+      titleLarge: TextStyle(color: Color(0xFF171514)),
+      titleMedium: TextStyle(color: Color(0xFF171514)),
     ),
     inputDecorationTheme: const InputDecorationTheme(
       filled: true,
-      fillColor: Color(0xFFEAF1F4),
-      border: InputBorder.none,
+      fillColor: Color.fromARGB(255, 245, 166, 166),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.all(Radius.circular(14)),
+        borderSide: BorderSide.none,
+      ),
+      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
     ),
     appBarTheme: const AppBarTheme(
       backgroundColor: Colors.transparent,
       elevation: 0,
       surfaceTintColor: Colors.transparent,
-      foregroundColor: Color(0xFF17232E),
+      foregroundColor: Color(0xFF171514),
+      centerTitle: false,
     ),
     cardTheme: const CardThemeData(
-      color: Colors.transparent,
-      surfaceTintColor: Colors.transparent,
+      color: Color.fromARGB(0, 59, 58, 58),
+      surfaceTintColor: Color.fromARGB(0, 49, 49, 49),
       elevation: 0,
     ),
     useMaterial3: true,
   );
 
-  static ThemeData get dark => ThemeData(
+  static ThemeData dark([Color? accent]) => ThemeData(
     brightness: Brightness.dark,
-    colorSchemeSeed: const Color(0xFF1DB954),
-    scaffoldBackgroundColor: const Color(0xFF121212),
-    canvasColor: const Color(0xFF121212),
-    dividerColor: const Color(0xFF2A2A2A),
+    colorScheme: ColorScheme.fromSeed(
+      seedColor: _blend(_darkSeed, accent, 0.55),
+      brightness: Brightness.dark,
+      surface: _blend(const Color.fromARGB(255, 36, 39, 43), accent, 0.14),
+    ),
+    scaffoldBackgroundColor: _blend(const Color(0xFF1B1E22), accent, 0.16),
+    canvasColor: const Color(0xFF1B1E22),
+    dividerColor: const Color(0xFF30343A),
     inputDecorationTheme: const InputDecorationTheme(
       filled: true,
-      fillColor: Color(0xFF242424),
-      border: InputBorder.none,
+      fillColor: Color(0xFF24282D),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.all(Radius.circular(14)),
+        borderSide: BorderSide.none,
+      ),
+      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
     ),
     appBarTheme: const AppBarTheme(
       backgroundColor: Colors.transparent,
       elevation: 0,
       surfaceTintColor: Colors.transparent,
+      foregroundColor: Color(0xFFF3EEE8),
+      centerTitle: false,
     ),
     cardTheme: const CardThemeData(
       color: Colors.transparent,
