@@ -958,7 +958,12 @@ class _SearchResultTile extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
 
                       style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.56),
+                        color: const Color.fromARGB(
+                          255,
+                          255,
+                          255,
+                          255,
+                        ).withValues(alpha: 0.56),
 
                         fontSize: isPhone ? 14 : 15,
                       ),
