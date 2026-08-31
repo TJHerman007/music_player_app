@@ -1,9 +1,11 @@
 import 'dart:async';
-import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:music_player_app/audio/audio_effects.dart';
+
+import '../audio/audio_effects_sheet.dart';
 
 import '../audio/audio_library.dart';
 import '../utils/responsive.dart';
@@ -22,6 +24,11 @@ class PlayerBar extends StatefulWidget {
 }
 
 class _PlayerBarState extends State<PlayerBar> {
+  @override
+  void didUpdateWidget(covariant PlayerBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+  }
+
   @override
   Widget build(BuildContext context) {
     final track = widget.controller.currentTrack;
@@ -100,116 +107,180 @@ class _MiniPlayerState extends State<_MiniPlayer> {
   @override
   Widget build(BuildContext context) {
     final r = context.responsive;
-    final track = widget.controller.currentTrack;
-
-    if (track == null) {
-      return const SizedBox.shrink();
-    }
 
     return ListenableBuilder(
       listenable: widget.controller,
       builder: (context, _) {
-        final currentTrack = widget.controller.currentTrack;
+        final track = widget.controller.currentTrack;
 
-        if (currentTrack == null) {
+        if (track == null) {
           return const SizedBox.shrink();
         }
 
-        final accent = widget.controller.nowPlayingAccent;
+        return StreamBuilder<Duration>(
+          stream: widget.controller.player.positionStream,
+          initialData: widget.controller.player.position,
+          builder: (context, positionSnapshot) {
+            final position = positionSnapshot.data ?? Duration.zero;
 
-        return Material(
-          type: MaterialType.transparency,
-          child: InkWell(
-            onTap: widget.onOpenPlayer,
-            borderRadius: BorderRadius.circular(35),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 550),
-              curve: Curves.easeInOutCubic,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(35),
-                color: accent?.withValues(alpha: 0.24),
-                border: accent == null
-                    ? null
-                    : Border.all(
-                        color: accent.withValues(alpha: 0.30),
-                        width: 1,
+            return StreamBuilder<Duration?>(
+              stream: widget.controller.player.durationStream,
+              initialData: widget.controller.player.duration,
+              builder: (context, durationSnapshot) {
+                final duration = durationSnapshot.data ?? Duration.zero;
+                final total = duration.inMilliseconds;
+                final progress = total <= 0
+                    ? 0.0
+                    : (position.inMilliseconds / total).clamp(0.0, 1.0);
+
+                final accent =
+                    widget.controller.nowPlayingAccent ??
+                    Theme.of(context).colorScheme.primary;
+
+                return Material(
+                  type: MaterialType.transparency,
+                  child: InkWell(
+                    onTap: widget.onOpenPlayer,
+                    borderRadius: BorderRadius.circular(35),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 400),
+                      curve: Curves.easeInOutCubic,
+                      clipBehavior: Clip.antiAlias,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(35),
+                        color: accent.withValues(alpha: 0.20),
+                        border: Border.all(
+                          color: accent.withValues(alpha: 0.28),
+                        ),
                       ),
-              ),
-              child: Padding(
-                padding: EdgeInsets.symmetric(
-                  horizontal: r.value(mobile: 14, tablet: 20, desktop: 24),
-                  vertical: r.value(mobile: 8, tablet: 10, desktop: 12),
-                ),
-                child: Row(
-                  children: [
-                    TrackArtworkPreview(
-                      title: currentTrack.name,
-                      artwork: widget.controller.artworkFor(currentTrack),
-                      size: r.value(mobile: 52, tablet: 56, desktop: 60),
-                    ),
-
-                    SizedBox(
-                      width: r.value(mobile: 12, tablet: 14, desktop: 16),
-                    ),
-
-                    Expanded(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      child: Stack(
                         children: [
-                          Text(
-                            currentTrack.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: r.font(15),
-                              fontWeight: FontWeight.w700,
+                          Positioned.fill(
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: FractionallySizedBox(
+                                widthFactor: progress,
+                                child: ColoredBox(
+                                  color: accent.withValues(alpha: 0.16),
+                                ),
+                              ),
                             ),
                           ),
-                          Text(
-                            'Tap to open player',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(fontSize: r.font(12)),
+                          Padding(
+                            padding: EdgeInsets.fromLTRB(
+                              r.value(mobile: 12, tablet: 18, desktop: 22),
+                              r.value(mobile: 7, tablet: 9, desktop: 11),
+                              r.value(mobile: 12, tablet: 18, desktop: 22),
+                              r.value(mobile: 10, tablet: 12, desktop: 14),
+                            ),
+                            child: Row(
+                              children: [
+                                TrackArtworkPreview(
+                                  title: track.name,
+                                  artwork: widget.controller.artworkFor(track),
+                                  size: r.value(
+                                    mobile: 50,
+                                    tablet: 54,
+                                    desktop: 58,
+                                  ),
+                                ),
+                                SizedBox(
+                                  width: r.value(
+                                    mobile: 10,
+                                    tablet: 13,
+                                    desktop: 15,
+                                  ),
+                                ),
+                                Expanded(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        track.name,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: r.font(14),
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                      Text(
+                                        '${_formatDuration(position)} / '
+                                        '${_formatDuration(duration)}',
+                                        style: TextStyle(
+                                          fontSize: r.font(10),
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .onSurface
+                                              .withValues(alpha: 0.60),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                IconButton(
+                                  tooltip: 'Previous',
+                                  iconSize: r.icon(23),
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(
+                                    minWidth: 40,
+                                    minHeight: 40,
+                                  ),
+                                  onPressed: widget.controller.previousTrack,
+                                  icon: const Icon(Icons.skip_previous_rounded),
+                                ),
+                                _PlaybackButton(
+                                  controller: widget.controller,
+                                  track: track,
+                                ),
+                                IconButton(
+                                  tooltip: 'Next',
+                                  iconSize: r.icon(23),
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(
+                                    minWidth: 40,
+                                    minHeight: 40,
+                                  ),
+                                  onPressed: widget.controller.nextTrack,
+                                  icon: const Icon(Icons.skip_next_rounded),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            child: SizedBox(
+                              height: 3,
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: FractionallySizedBox(
+                                  widthFactor: progress,
+                                  child: ColoredBox(color: accent),
+                                ),
+                              ),
+                            ),
                           ),
                         ],
                       ),
                     ),
-
-                    _FavoriteButton(
-                      controller: widget.controller,
-                      track: currentTrack,
-                    ),
-
-                    IconButton(
-                      tooltip: 'Next song',
-                      iconSize: r.icon(27),
-                      icon: const Icon(Icons.skip_next_rounded),
-                      onPressed: widget.controller.nextTrack,
-                    ),
-
-                    _PlaybackButton(
-                      controller: widget.controller,
-                      track: currentTrack,
-                    ),
-
-                    IconButton(
-                      tooltip: 'Add to playlist',
-                      icon: const Icon(Icons.playlist_add_rounded),
-                      onPressed: () => TrackActions.showPlaylistPicker(
-                        context,
-                        controller: widget.controller,
-                        track: currentTrack,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
+                  ),
+                );
+              },
+            );
+          },
         );
       },
     );
+  }
+
+  String _formatDuration(Duration duration) {
+    final minutes = duration.inMinutes;
+    final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
   }
 }
 
@@ -691,6 +762,15 @@ class _MainPlayerContent extends StatelessWidget {
               ),
 
               _PlayerSmallIconButton(
+                icon: Icons.tune_rounded,
+                tooltip: 'Audio effects',
+                onPressed: () => _IntegratedAudioEffectsSheet.show(
+                  context,
+                  controller: controller,
+                ),
+              ),
+
+              _PlayerSmallIconButton(
                 icon: controller.repeatMode == AudioRepeatMode.one
                     ? Icons.repeat_one_rounded
                     : Icons.repeat_rounded,
@@ -1040,68 +1120,44 @@ class _PlayerProgress extends StatelessWidget {
           builder: (context, durationSnapshot) {
             final duration = durationSnapshot.data ?? Duration.zero;
 
-            final maximum = duration.inMilliseconds > 0
-                ? duration.inMilliseconds.toDouble()
-                : 1.0;
-
-            final progress =
-                (position.inMilliseconds.clamp(0, maximum.toInt()).toDouble() /
-                        maximum)
-                    .clamp(0.0, 1.0);
-
             final accent =
                 controller.nowPlayingAccent ??
                 Theme.of(context).colorScheme.primary;
 
             return Column(
               children: [
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTapDown: (details) {
-                    final box = context.findRenderObject() as RenderBox;
-
-                    final localPosition = box.globalToLocal(
-                      details.globalPosition,
-                    );
-
-                    final width = box.size.width;
-
-                    final newProgress = (localPosition.dx / width).clamp(
-                      0.0,
-                      1.0,
-                    );
-
-                    controller.player.seek(
-                      Duration(milliseconds: (maximum * newProgress).round()),
-                    );
-                  },
-                  child: Padding(
-                    padding: EdgeInsets.symmetric(vertical: r.scale(8)),
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        return ClipRRect(
-                          borderRadius: BorderRadius.circular(20),
-                          child: Container(
-                            height: 7,
-                            width: double.infinity,
-                            color: Colors.white.withValues(alpha: 0.16),
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: AnimatedContainer(
-                                duration: const Duration(milliseconds: 160),
-                                curve: Curves.easeOutCubic,
-                                width: constraints.maxWidth * progress,
-                                height: 7,
-                                decoration: BoxDecoration(
-                                  color: accent,
-                                  borderRadius: BorderRadius.circular(20),
-                                ),
-                              ),
-                            ),
-                          ),
-                        );
-                      },
+                SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    activeTrackColor: Color.lerp(accent, Colors.black, 0.30),
+                    inactiveTrackColor: Colors.white.withValues(alpha: 0.20),
+                    thumbColor: Color.lerp(accent, Colors.black, 0.18),
+                    overlayColor: accent.withValues(alpha: 0.14),
+                    trackHeight: r.value(mobile: 5, tablet: 6, desktop: 6),
+                    thumbShape: RoundSliderThumbShape(
+                      enabledThumbRadius: r.value(
+                        mobile: 6,
+                        tablet: 7,
+                        desktop: 8,
+                      ),
                     ),
+                  ),
+                  child: Slider(
+                    value: duration.inMilliseconds <= 0
+                        ? 0.0
+                        : (position.inMilliseconds / duration.inMilliseconds)
+                              .clamp(0.0, 1.0),
+                    min: 0.0,
+                    max: 1.0,
+                    onChanged: duration.inMilliseconds <= 0
+                        ? null
+                        : (value) {
+                            controller.player.seek(
+                              Duration(
+                                milliseconds: (duration.inMilliseconds * value)
+                                    .round(),
+                              ),
+                            );
+                          },
                   ),
                 ),
 
@@ -1141,7 +1197,6 @@ class _PlayerProgress extends StatelessWidget {
 
   String _formatDuration(Duration duration) {
     final minutes = duration.inMinutes;
-
     final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
 
     return '$minutes:$seconds';
@@ -1241,6 +1296,386 @@ class _AnimatedPlayPauseIcon extends StatelessWidget {
             ? Icons.pause_circle_filled_rounded
             : Icons.play_circle_filled_rounded,
         key: ValueKey<bool>(isPlaying),
+      ),
+    );
+  }
+}
+
+// ==========================================================
+// MODERN AUDIO EFFECTS SHEET
+// ==========================================================
+
+class _IntegratedAudioEffectsSheet extends StatelessWidget {
+  const _IntegratedAudioEffectsSheet({required this.controller, super.key});
+
+  final AudioLibraryController controller;
+
+  static Future<void> show(
+    BuildContext context, {
+    required AudioLibraryController controller,
+  }) {
+    return showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => _IntegratedAudioEffectsSheet(controller: controller),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final r = context.responsive;
+
+    return ListenableBuilder(
+      listenable: controller.audioEngine,
+      builder: (context, _) {
+        final effects = controller.audioEngine.effects;
+        final spatialEnabled = controller.spatialEnabled;
+        final spatialDepth = controller.spatialDepth;
+        final karaokeEnabled = controller.karaokeEnabled;
+
+        return Padding(
+          padding: EdgeInsets.fromLTRB(
+            r.value(mobile: 8, tablet: 18, desktop: 24),
+            0,
+            r.value(mobile: 8, tablet: 18, desktop: 24),
+            8,
+          ),
+          child: Material(
+            color: scheme.surface,
+            elevation: 0,
+            clipBehavior: Clip.antiAlias,
+            borderRadius: BorderRadius.circular(r.radius(28)),
+            child: SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(
+                r.value(mobile: 18, tablet: 24, desktop: 28),
+                12,
+                r.value(mobile: 18, tablet: 24, desktop: 28),
+                22,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 38,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: scheme.onSurface.withValues(alpha: .14),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Audio',
+                          style: TextStyle(
+                            fontSize: r.font(20),
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Reset',
+                        onPressed: controller.audioEngine.reset,
+                        icon: const Icon(Icons.refresh_rounded),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+
+                  _EffectSection(
+                    title: 'Speed',
+                    value: '${effects.speed.toStringAsFixed(2)}×',
+                    child: Slider(
+                      value: effects.speed,
+                      min: .5,
+                      max: 2,
+                      divisions: 30,
+                      onChanged: controller.audioEngine.setSpeed,
+                    ),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  _EffectSection(
+                    title: 'Pitch',
+                    value:
+                        '${effects.pitchSemitones >= 0 ? '+' : ''}'
+                        '${effects.pitchSemitones.toStringAsFixed(1)} st',
+                    child: Slider(
+                      value: effects.pitchSemitones,
+                      min: -12,
+                      max: 12,
+                      divisions: 48,
+                      onChanged: controller.audioEngine.setPitch,
+                    ),
+                  ),
+
+                  const SizedBox(height: 8),
+                  const Divider(height: 28),
+
+                  _EqSection(
+                    effects: effects,
+                    onChanged: (index, value) {
+                      controller.audioEngine.setEqBand(index, value);
+                    },
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  _CleanEffectRow(
+                    icon: Icons.spatial_audio_rounded,
+                    title: 'Spatial audio',
+                    subtitle: spatialEnabled
+                        ? 'Immersion ${(spatialDepth * 100).round()}%'
+                        : 'Off',
+                    value: spatialEnabled,
+                    onChanged: (enabled) {
+                      controller.audioEngine.setSpatialEnabled(enabled);
+                      controller.audioEngine.setSpatialDepth(spatialDepth);
+                    },
+                  ),
+
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
+                    child: spatialEnabled
+                        ? Padding(
+                            padding: const EdgeInsets.only(left: 52, right: 4),
+                            child: Slider(
+                              value: spatialDepth,
+                              min: 0,
+                              max: 1,
+                              divisions: 20,
+                              onChanged: (depth) {
+                                controller.audioEngine.setSpatialDepth(depth);
+                              },
+                            ),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+
+                  _CleanEffectRow(
+                    icon: Icons.mic_off_rounded,
+                    title: 'Karaoke',
+                    subtitle: karaokeEnabled
+                        ? 'Vocal reduction on'
+                        : 'Reduce centered vocals',
+                    value: karaokeEnabled,
+                    onChanged: controller.audioEngine.setKaraokeEnabled,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _EffectSection extends StatelessWidget {
+  const _EffectSection({
+    required this.title,
+    required this.value,
+    required this.child,
+  });
+
+  final String title;
+  final String value;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                color: scheme.primary,
+              ),
+            ),
+          ],
+        ),
+        child,
+      ],
+    );
+  }
+}
+
+class _EqSection extends StatelessWidget {
+  const _EqSection({required this.effects, required this.onChanged});
+
+  final AudioEffects effects;
+  final void Function(int index, double value) onChanged;
+
+  static const List<String> _labels = [
+    '60',
+    '120',
+    '250',
+    '500',
+    '1k',
+    '2k',
+    '4k',
+    '8k',
+    '12k',
+    '16k',
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final r = context.responsive;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                '10-band EQ',
+                style: TextStyle(
+                  fontSize: r.font(14),
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            Text(
+              '±12 dB',
+              style: TextStyle(
+                fontSize: r.font(12),
+                fontWeight: FontWeight.w700,
+                color: scheme.primary,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          height: 190,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: List.generate(effects.eq.length, (index) {
+              return Expanded(
+                child: Column(
+                  children: [
+                    Expanded(
+                      child: RotatedBox(
+                        quarterTurns: 3,
+                        child: Slider(
+                          value: effects.eq[index].clamp(-12.0, 12.0),
+                          min: -12.0,
+                          max: 12.0,
+                          divisions: 48,
+                          onChanged: (value) => onChanged(index, value),
+                        ),
+                      ),
+                    ),
+                    Text(
+                      _labels[index],
+                      style: TextStyle(
+                        fontSize: r.font(9),
+                        fontWeight: FontWeight.w700,
+                        color: scheme.onSurface.withValues(alpha: .60),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _CleanEffectRow extends StatelessWidget {
+  const _CleanEffectRow({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    this.onChanged,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final r = context.responsive;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(r.radius(18)),
+        onTap: onChanged == null ? null : () => onChanged!(!value),
+        child: Padding(
+          padding: EdgeInsets.symmetric(vertical: r.scale(8)),
+          child: Row(
+            children: [
+              Container(
+                width: r.scale(42),
+                height: r.scale(42),
+                decoration: BoxDecoration(
+                  color: scheme.primary.withValues(alpha: .10),
+                  borderRadius: BorderRadius.circular(r.radius(14)),
+                ),
+                child: Icon(icon, size: r.icon(20)),
+              ),
+              SizedBox(width: r.scale(12)),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: r.font(14),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: r.font(11),
+                        color: scheme.onSurface.withValues(alpha: .52),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Switch.adaptive(value: value, onChanged: onChanged),
+            ],
+          ),
+        ),
       ),
     );
   }

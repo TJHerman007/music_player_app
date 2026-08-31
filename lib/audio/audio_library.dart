@@ -10,6 +10,8 @@ import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 import 'package:media_metadata/media_metadata.dart';
+import 'package:music_player_app/audio/audio_engine.dart';
+import 'package:music_player_app/audio/audio_engine_bridge.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -92,6 +94,7 @@ enum AudioRepeatMode { off, all, one }
 class AudioLibraryController extends ChangeNotifier {
   AudioLibraryController({this._preferences, Future<void>? backgroundReady})
     : _backgroundReady = backgroundReady ?? Future<void>.value() {
+    _deviceAudioChannel.setMethodCallHandler(_handleDeviceAudioEvent);
     unawaited(_backgroundReady);
     unawaited(ready);
     unawaited(_restorePlaylists());
@@ -101,15 +104,25 @@ class AudioLibraryController extends ChangeNotifier {
   }
 
   static const _stateKey = 'audio_library_state';
+  static const _lastLibraryScanKey = 'audio_library_last_scan_seconds';
   static const _playlistStateKey = 'audio_library_playlists';
   static const int maxPlaylists = 50;
 
   final AudioPlayer player = AudioPlayer();
+
+  /// Shared Flutter-side effects state.
+  ///
+  /// This does not replace the existing just_audio player.
+  final AudioEngine audioEngine = AudioEngine();
+
+  /// Shared bridge to the Android native audio engine.
+  final AudioEngineBridge audioBridge = AudioEngineBridge();
   final SharedPreferences? _preferences;
   final Future<void> _backgroundReady;
   Future<void> _persistenceQueue = Future<void>.value();
   Timer? _persistDebounce;
   final Map<String, Future<Uint8List?>> _artworkRequests = {};
+  final Map<String, Future<Uri?>> _notificationArtworkRequests = {};
   Map<String, List<ArtistGroup>>? _artistCategoryCache;
   Map<String, List<AlbumGroup>>? _albumCategoryCache;
   bool _metadataScanRunning = false;
@@ -128,6 +141,8 @@ class AudioLibraryController extends ChangeNotifier {
   AudioTrack? currentTrack;
   TrackSource currentSource = TrackSource.library;
   bool isBusy = false;
+  bool _backgroundLibraryScanRunning = false;
+  bool _backgroundLibraryScanPending = false;
   bool isRestoring = true;
   bool shuffleEnabled = false;
   AudioRepeatMode repeatMode = AudioRepeatMode.off;
@@ -368,6 +383,142 @@ class AudioLibraryController extends ChangeNotifier {
   /// One-button scan:
   /// 1. Run the existing fast device scan.
   /// 2. Start metadata enrichment separately without blocking the UI.
+  /// Discovers only audio added since the last successful library check.
+  ///
+  /// Startup restores the cached library immediately. This method then performs
+  /// a lightweight MediaStore incremental query in the background and appends
+  /// only genuinely new tracks. Existing tracks and playback are untouched.
+  Future<dynamic> _handleDeviceAudioEvent(MethodCall call) async {
+    if (call.method == 'audioLibraryChanged') {
+      // If another MediaStore change arrives during a query, remember it and
+      // run one more incremental pass when the current pass finishes.
+      if (_backgroundLibraryScanRunning) {
+        _backgroundLibraryScanPending = true;
+      } else {
+        unawaited(scanForNewSongsInBackground());
+      }
+    }
+    return null;
+  }
+
+  Future<void> scanForNewSongsInBackground() async {
+    if (defaultTargetPlatform != TargetPlatform.android ||
+        _backgroundLibraryScanRunning ||
+        isBusy) {
+      return;
+    }
+
+    await ready;
+    if (_backgroundLibraryScanRunning || isBusy) return;
+
+    _backgroundLibraryScanRunning = true;
+    try {
+      final audioPermission = await Permission.audio.request();
+      final storagePermission = await Permission.storage.request();
+      if (!audioPermission.isGranted && !storagePermission.isGranted) return;
+
+      final lastScan = _preferences?.getInt(_lastLibraryScanKey);
+
+      // First run has no cached library timestamp, so perform the initial full
+      // import once. Later startups use only the incremental query.
+      if (lastScan == null) {
+        await _initialLibraryScanInBackground();
+        return;
+      }
+
+      final songs = await _deviceAudioChannel.invokeMethod<List<dynamic>>(
+        'scanNewAudio',
+        {'sinceSeconds': lastScan},
+      );
+
+      await _appendNewSongs(songs ?? const <dynamic>[]);
+
+      // Move the checkpoint only after the query and merge completed.
+      await _preferences?.setInt(
+        _lastLibraryScanKey,
+        DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      );
+    } catch (_) {
+      // Background discovery is best-effort. Keep the old checkpoint so the
+      // next startup can retry anything that was missed.
+    } finally {
+      _backgroundLibraryScanRunning = false;
+      if (_backgroundLibraryScanPending) {
+        _backgroundLibraryScanPending = false;
+        unawaited(scanForNewSongsInBackground());
+      }
+    }
+  }
+
+  Future<void> _initialLibraryScanInBackground() async {
+    final songs = await _deviceAudioChannel.invokeMethod<List<dynamic>>(
+      'scanAudio',
+    );
+    await _appendNewSongs(songs ?? const <dynamic>[]);
+    await _preferences?.setInt(
+      _lastLibraryScanKey,
+      DateTime.now().millisecondsSinceEpoch ~/ 1000,
+    );
+  }
+
+  Future<void> _appendNewSongs(List<dynamic> songs) async {
+    final existingPaths = <String>{...tracks.map((track) => track.path)};
+    final pending = <AudioTrack>[];
+    const batchSize = 24;
+
+    for (var i = 0; i < songs.length; i++) {
+      final item = songs[i];
+      if (item is! Map) continue;
+
+      final song = Map<String, dynamic>.from(item);
+      final path = song['path'] as String?;
+      final title = song['title'] as String? ?? 'Unknown track';
+      final artist = _cleanArtist(song['artist']?.toString());
+      final albumArtist = _cleanArtist(song['albumArtist']?.toString());
+      final album = _cleanAlbum(song['album']?.toString());
+      final resolvedArtist = artist != 'Unknown' ? artist : albumArtist;
+
+      if (path == null ||
+          path.isEmpty ||
+          !_isAllowedAudio(path) ||
+          _removedPaths.contains(path) ||
+          !existingPaths.add(path)) {
+        continue;
+      }
+
+      pending.add(
+        AudioTrack(
+          name: title,
+          path: path,
+          artist: resolvedArtist,
+          album: album,
+        ),
+      );
+
+      if (pending.length >= batchSize || i == songs.length - 1) {
+        if (pending.isNotEmpty) {
+          tracks.addAll(pending);
+          pending.clear();
+          _artistCategoryCache = null;
+          _albumCategoryCache = null;
+          notifyListeners();
+          await Future<void>.delayed(Duration.zero);
+        }
+      }
+    }
+
+    if (pending.isNotEmpty) {
+      tracks.addAll(pending);
+      _artistCategoryCache = null;
+      _albumCategoryCache = null;
+      notifyListeners();
+    }
+
+    if (songs.isNotEmpty) {
+      _schedulePersist();
+    }
+  }
+
   Future<bool> scanDeviceMusicSmooth() async {
     final success = await scanDeviceMusic();
 
@@ -626,6 +777,10 @@ class AudioLibraryController extends ChangeNotifier {
       }
 
       _schedulePersist();
+      await _preferences?.setInt(
+        _lastLibraryScanKey,
+        DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      );
       return true;
     } catch (_) {
       errorMessage = 'Could not scan music on this phone.';
@@ -817,22 +972,159 @@ class AudioLibraryController extends ChangeNotifier {
     return lastPart.substring(dot + 1).toLowerCase();
   }
 
+  // ==========================================================================
+  // AUDIO ENGINE / EFFECT CONTROLS
+  // ==========================================================================
+  //
+  // These methods keep the existing just_audio playback path intact while
+  // synchronizing the Flutter AudioEngine state with the native bridge.
+  //
+  // The native bridge calls are intentionally fire-and-forget. A native effect
+  // failure must not interrupt normal library/playback behavior.
+
+  double get speed => audioEngine.effects.speed;
+
+  double get pitchSemitones => audioEngine.effects.pitchSemitones;
+
+  List<double> get eqBands => audioEngine.effects.eq;
+
+  bool get spatialEnabled => audioEngine.spatialEnabled;
+
+  double get spatialDepth => audioEngine.spatialDepth;
+
+  bool get karaokeEnabled => audioEngine.karaokeEnabled;
+
+  void setSpeed(double value) {
+    audioEngine.effects.setSpeed(value);
+    unawaited(_sendSpeedToNative(audioEngine.effects.speed));
+    notifyListeners();
+  }
+
+  Future<void> _sendSpeedToNative(double value) async {
+    try {
+      await audioBridge.setSpeed(value);
+    } catch (error, stackTrace) {
+      debugPrint('AudioEngine setSpeed failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
+  }
+
+  void setPitch(double value) {
+    audioEngine.effects.setPitch(value);
+    unawaited(_sendPitchToNative(audioEngine.effects.pitchSemitones));
+    notifyListeners();
+  }
+
+  Future<void> _sendPitchToNative(double value) async {
+    try {
+      await audioBridge.setPitch(value);
+    } catch (error, stackTrace) {
+      debugPrint('AudioEngine setPitch failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
+  }
+
+  void setEq(List<double> bands) {
+    audioEngine.effects.setEq(bands);
+    unawaited(_sendEqToNative(audioEngine.effects.eq));
+    notifyListeners();
+  }
+
+  void setEqBand(int index, double db) {
+    audioEngine.effects.setEqBand(index, db);
+    unawaited(_sendEqToNative(audioEngine.effects.eq));
+    notifyListeners();
+  }
+
+  Future<void> _sendEqToNative(List<double> bands) async {
+    try {
+      await audioBridge.setEq(bands);
+    } catch (error, stackTrace) {
+      debugPrint('AudioEngine setEq failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
+  }
+
+  void setKaraoke(bool enabled) {
+    audioEngine.setKaraokeEnabled(enabled);
+    unawaited(_sendKaraokeToNative(enabled ? 1.0 : 0.0));
+    notifyListeners();
+  }
+
+  Future<void> _sendKaraokeToNative(double amount) async {
+    try {
+      await audioBridge.setKaraoke(amount);
+    } catch (error, stackTrace) {
+      debugPrint('AudioEngine setKaraoke failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
+  }
+
+  void setSpatial(bool enabled, double depth) {
+    audioEngine.setSpatialEnabled(enabled);
+    audioEngine.setSpatialDepth(depth);
+
+    unawaited(_sendSpatialToNative(enabled, audioEngine.spatialDepth));
+
+    notifyListeners();
+  }
+
+  Future<void> _sendSpatialToNative(bool enabled, double depth) async {
+    try {
+      await audioBridge.setSpatial(enabled, depth);
+    } catch (error, stackTrace) {
+      debugPrint('AudioEngine setSpatial failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
+  }
+
+  void resetAudioEffects() {
+    audioEngine.reset();
+
+    unawaited(_sendSpeedToNative(audioEngine.effects.speed));
+    unawaited(_sendPitchToNative(audioEngine.effects.pitchSemitones));
+    unawaited(_sendEqToNative(audioEngine.effects.eq));
+    unawaited(_sendKaraokeToNative(audioEngine.karaokeEnabled ? 1.0 : 0.0));
+    unawaited(
+      _sendSpatialToNative(
+        audioEngine.spatialEnabled,
+        audioEngine.spatialDepth,
+      ),
+    );
+
+    notifyListeners();
+  }
+
   Future<void> playTrack(
     AudioTrack track, {
     TrackSource source = TrackSource.library,
   }) async {
     try {
       if (currentTrack?.path != track.path) {
-        final mediaItem = MediaItem(id: track.path, title: track.name);
+        // Prepare notification artwork before creating the MediaItem.
+        // The notification service needs a URI it can access independently
+        // of the Flutter widget tree.
+        final artworkUri = await _notificationArtworkUri(track);
+
+        final mediaItem = MediaItem(
+          id: track.path,
+          title: track.name,
+          artist: track.artist.trim().isEmpty ? 'Unknown' : track.artist,
+          album: track.album.trim().isEmpty ? 'Unknown album' : track.album,
+          artUri: artworkUri,
+        );
+
         if (track.path.startsWith('content://')) {
           try {
             final cachedPath = await _deviceAudioChannel.invokeMethod<String>(
               'resolveAudio',
               {'uri': track.path},
             );
+
             if (cachedPath == null || cachedPath.isEmpty) {
               throw StateError('Audio file could not be resolved.');
             }
+
             await player.setFilePath(cachedPath, tag: mediaItem);
           } on MissingPluginException {
             // Allow hot-reloaded older APKs to play before native code is rebuilt.
@@ -843,11 +1135,14 @@ class AudioLibraryController extends ChangeNotifier {
         } else {
           await player.setFilePath(track.path, tag: mediaItem);
         }
+
         currentTrack = track;
         unawaited(_updateNowPlayingAccent(track));
       }
+
       currentSource = source;
       _recordRecentlyPlayed(track);
+
       await player.play();
       _notifyAndPersist();
     } catch (error) {
@@ -855,6 +1150,45 @@ class AudioLibraryController extends ChangeNotifier {
       errorMessage = 'This audio file could not be played.';
       notifyListeners();
     }
+  }
+
+  /// Creates a persistent local artwork file for the Android media
+  /// notification. This works for both normal file paths and MediaStore
+  /// content:// URIs because the artwork is copied into the app cache.
+  Future<Uri?> _notificationArtworkUri(AudioTrack track) {
+    return _notificationArtworkRequests.putIfAbsent(track.path, () async {
+      try {
+        final bytes = await artworkFor(track);
+
+        if (bytes == null || bytes.isEmpty) {
+          return null;
+        }
+
+        final directory = await getTemporaryDirectory();
+
+        final safeKey = track.path.hashCode.toString();
+
+        // Embedded artwork can be JPEG, PNG, WebP, etc. Android can read
+        // the bytes from the cached file without needing the original URI.
+        final artworkFile = File(
+          '${directory.path}${Platform.pathSeparator}'
+          'music_player_notification_art_$safeKey.jpg',
+        );
+
+        if (!await artworkFile.exists() ||
+            await artworkFile.length() != bytes.length) {
+          await artworkFile.writeAsBytes(bytes, flush: true);
+        }
+
+        return artworkFile.uri;
+      } catch (error) {
+        debugPrint(
+          'Could not prepare notification artwork for '
+          '${track.name}: $error',
+        );
+        return null;
+      }
+    });
   }
 
   Future<void> togglePlayback() async {
@@ -1043,6 +1377,7 @@ class AudioLibraryController extends ChangeNotifier {
   @override
   void dispose() {
     _persistDebounce?.cancel();
+    unawaited(audioBridge.release());
     _persistState();
     player.dispose();
     super.dispose();
@@ -1114,7 +1449,10 @@ class AudioLibraryController extends ChangeNotifier {
     }
   }
 
-  Future<void> pauseTrack() async {}
+  Future<void> pauseTrack() async {
+    await player.pause();
+    _notifyAndPersist();
+  }
 }
 
 // ============================================================================

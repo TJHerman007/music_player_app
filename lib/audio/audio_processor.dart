@@ -7,35 +7,45 @@ import 'audio_spatial.dart';
 
 /// Single entry point for all audio processing.
 ///
-/// The AudioPlayer is supplied by AudioLibraryController. This class does
-/// NOT create another player.
+/// The AudioPlayer is supplied by AudioLibraryController.
+/// This class does NOT create another player.
 class AudioProcessor extends ChangeNotifier {
-  AudioProcessor({
-    required AudioPlayer player,
-  })  : _player = player,
-        effects = AudioEffects(player: player),
-        spatial = AudioSpatial(player: player),
-        karaoke = const AudioKaraoke() {
+  AudioProcessor({required AudioPlayer player})
+    : _player = player,
+      effects = AudioEffects(),
+      spatial = AudioSpatial(player: player),
+      karaoke = const AudioKaraoke() {
     effects.addListener(_childChanged);
     spatial.addListener(_childChanged);
   }
 
   final AudioPlayer _player;
 
+  /// Speed, pitch and 10-band EQ state.
   final AudioEffects effects;
+
+  /// Spatial / 3D audio controls.
   final AudioSpatial spatial;
+
+  /// Karaoke processor.
   final AudioKaraoke karaoke;
 
   bool _karaokeEnabled = false;
   String? _karaokePath;
 
   AudioPlayer get player => _player;
+
   bool get karaokeEnabled => _karaokeEnabled;
+
   String? get karaokePath => _karaokePath;
 
   void _childChanged() {
     notifyListeners();
   }
+
+  // ==========================================================
+  // KARAOKE
+  // ==========================================================
 
   Future<bool> enableKaraoke({
     required String originalResolvedPath,
@@ -46,14 +56,18 @@ class AudioProcessor extends ChangeNotifier {
       cacheKey: cacheKey,
     );
 
-    if (processedPath == null) return false;
+    if (processedPath == null) {
+      return false;
+    }
 
     final applied = await karaoke.applyToPlayer(
       player: _player,
       processedPath: processedPath,
     );
 
-    if (!applied) return false;
+    if (!applied) {
+      return false;
+    }
 
     _karaokeEnabled = true;
     _karaokePath = processedPath;
@@ -62,17 +76,15 @@ class AudioProcessor extends ChangeNotifier {
     return true;
   }
 
-  Future<bool> disableKaraoke({
-    required String originalResolvedPath,
-  }) async {
+  Future<bool> disableKaraoke({required String originalResolvedPath}) async {
     final position = _player.position;
-    final playing = _player.playing;
+    final wasPlaying = _player.playing;
 
     try {
       await _player.setFilePath(originalResolvedPath);
       await _player.seek(position);
 
-      if (playing) {
+      if (wasPlaying) {
         await _player.play();
       }
 
@@ -81,20 +93,37 @@ class AudioProcessor extends ChangeNotifier {
 
       notifyListeners();
       return true;
-    } catch (_) {
+    } catch (error) {
+      debugPrint('Could not disable karaoke: $error');
+
       return false;
     }
   }
 
-  Future<void> reset() async {
-    await effects.reset();
+  // ==========================================================
+  // RESET AUDIO EFFECTS
+  // ==========================================================
 
+  Future<void> reset() async {
+    // Keep the existing AudioEffects reset exactly as defined
+    // in audio_effects.dart.
+    effects.reset();
+
+    // Disable spatial audio using its existing API.
     if (spatial.enabled) {
       await spatial.setEnabled(false);
     }
 
+    // Reset karaoke state.
+    _karaokeEnabled = false;
+    _karaokePath = null;
+
     notifyListeners();
   }
+
+  // ==========================================================
+  // DISPOSE
+  // ==========================================================
 
   @override
   void dispose() {

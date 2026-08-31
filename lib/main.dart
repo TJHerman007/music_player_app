@@ -9,11 +9,25 @@ import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
   await JustAudioBackground.init(
     androidNotificationChannelId: 'com.example.music_player_app.audio',
     androidNotificationChannelName: 'Music playback',
+    androidNotificationChannelDescription: 'Music playback controls',
+
+    // Keep the notification ongoing while playback is active.
     androidNotificationOngoing: true,
+
+    // Must be true when androidNotificationOngoing is true.
+    androidStopForegroundOnPause: true,
+
+    // Tapping the notification opens the app.
+    androidNotificationClickStartsActivity: true,
+
+    // Allow album artwork to be loaded for the notification.
+    preloadArtwork: true,
   );
+
   runApp(const MusicPlayerBootstrap());
 }
 
@@ -38,10 +52,16 @@ class _MusicPlayerBootstrapState extends State<MusicPlayerBootstrap> {
       final preferences = await SharedPreferences.getInstance().timeout(
         const Duration(seconds: 2),
       );
+
       if (!mounted) return;
-      setState(() => _preferences = preferences);
+
+      setState(() {
+        _preferences = preferences;
+      });
     } on Object {
-      if (mounted) setState(() {});
+      if (mounted) {
+        setState(() {});
+      }
     }
   }
 
@@ -72,6 +92,7 @@ class _MusicPlayerAppState extends State<MusicPlayerApp> {
   late final ThemeProvider _themeProvider = ThemeProvider(
     preferences: widget.preferences,
   );
+
   late final AudioLibraryController _audioLibrary = AudioLibraryController(
     preferences: widget.preferences,
     backgroundReady: widget.backgroundReady,
@@ -90,14 +111,20 @@ class _MusicPlayerAppState extends State<MusicPlayerApp> {
       listenable: Listenable.merge([_themeProvider, _audioLibrary]),
       builder: (context, child) {
         final accent = _audioLibrary.nowPlayingAccent;
+
         return MaterialApp(
           debugShowCheckedModeBanner: false,
           title: 'Music Player',
+
           theme: AppTheme.light(accent),
           darkTheme: AppTheme.dark(accent),
+
           themeMode: _themeProvider.themeMode,
+
           themeAnimationDuration: const Duration(milliseconds: 900),
+
           themeAnimationCurve: Curves.easeInOutCubic,
+
           home: HomePage(
             themeProvider: _themeProvider,
             audioLibrary: _audioLibrary,
