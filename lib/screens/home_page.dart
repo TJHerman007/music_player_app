@@ -95,7 +95,6 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     final r = context.responsive;
-    final colors = Theme.of(context).colorScheme;
 
     return DefaultTabController(
       length: 5,

@@ -6,12 +6,15 @@
 
 #include "generated_plugin_registrant.h"
 
+#include <ffmpeg_kit_flutter_new_audio/f_fmpeg_kit_flutter_plugin.h>
 #include <media_metadata/media_metadata_plugin_c_api.h>
 #include <permission_handler_windows/permission_handler_windows_plugin.h>
 #include <share_plus/share_plus_windows_plugin_c_api.h>
 #include <url_launcher_windows/url_launcher_windows.h>
 
 void RegisterPlugins(flutter::PluginRegistry* registry) {
+  FFmpegKitFlutterPluginRegisterWithRegistrar(
+      registry->GetRegistrarForPlugin("FFmpegKitFlutterPlugin"));
   MediaMetadataPluginCApiRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("MediaMetadataPluginCApi"));
   PermissionHandlerWindowsPluginRegisterWithRegistrar(
