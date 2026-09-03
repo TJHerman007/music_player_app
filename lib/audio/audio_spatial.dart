@@ -5,7 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 
 class AudioSpatial extends ChangeNotifier {
-  AudioSpatial({required AudioPlayer player}) : _player = player {
+  AudioSpatial({required this._player}) {
     _sessionSubscription = _player.androidAudioSessionIdStream.listen((
       sessionId,
     ) {

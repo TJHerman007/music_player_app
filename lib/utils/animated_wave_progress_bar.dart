@@ -1,15 +1,19 @@
 import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
-/// Animated 3-layer wave progress bar for a music player.
+/// TIUS animated 3-layer wave progress bar.
 ///
-/// Features:
-/// - Three independently animated wave layers.
-/// - Waves are visible only in the played portion.
-/// - Tap or drag to seek.
-/// - Glowing circular seek handle.
-/// - Animation automatically pauses when [isPlaying] is false.
-/// - Designed to work with any audio player package through [onSeek].
+/// Visual design:
+/// - Three animated wave layers.
+/// - Bright pink played region.
+/// - Soft pink/purple layered waves.
+/// - Dark/light adaptive unplayed track.
+/// - Glowing white/pink seek handle.
+/// - Tap anywhere to seek.
+/// - Drag horizontally to seek.
+/// - Animation runs only while playing.
+/// - Pausing preserves the current wave phase.
 class AnimatedWaveProgressBar extends StatefulWidget {
   const AnimatedWaveProgressBar({
     super.key,
@@ -17,49 +21,41 @@ class AnimatedWaveProgressBar extends StatefulWidget {
     required this.duration,
     required this.isPlaying,
     required this.onSeek,
-    this.height = 56,
+
+    this.height = 52,
     this.waveHeight = 10,
-    this.trackHeight = 8,
-    this.handleRadius = 18,
-    this.waveColor = const Color(0xFF86BEEA),
-    this.waveHighlightColor = const Color(0xFFB7D8F5),
-    this.trackColor = const Color(0xFF304A60),
-    this.handleColor = const Color(0xFFCFE6FF),
+    this.trackHeight = 10,
+    this.handleRadius = 9,
+
+    this.waveColor = const Color(0xFFFF2A8B),
+    this.waveHighlightColor = const Color(0xFFFF72B5),
+    this.waveSecondaryColor = const Color(0xFFE83291),
+
+    this.trackColor = const Color(0xFFE8DDE7),
+    this.handleColor = Colors.white,
+    this.handleCenterColor = const Color(0xFFFF2A8B),
+
     this.showHandle = true,
   });
 
-  /// Current playback position.
   final Duration position;
-
-  /// Total track duration.
   final Duration duration;
-
-  /// Whether the audio is currently playing.
-  ///
-  /// The wave animation runs while true and pauses while false.
   final bool isPlaying;
-
-  /// Called whenever the user taps/drags to a new position.
   final ValueChanged<Duration> onSeek;
 
-  /// Total height reserved for the progress bar.
   final double height;
-
-  /// Base wave amplitude.
   final double waveHeight;
-
-  /// Height of the background progress track.
   final double trackHeight;
-
-  /// Radius of the circular seek handle.
   final double handleRadius;
 
   final Color waveColor;
   final Color waveHighlightColor;
+  final Color waveSecondaryColor;
+
   final Color trackColor;
   final Color handleColor;
+  final Color handleCenterColor;
 
-  /// Set false if you want to hide the circular handle.
   final bool showHandle;
 
   @override
@@ -67,10 +63,11 @@ class AnimatedWaveProgressBar extends StatefulWidget {
       _AnimatedWaveProgressBarState();
 }
 
-class _AnimatedWaveProgressBarState
-    extends State<AnimatedWaveProgressBar>
+class _AnimatedWaveProgressBarState extends State<AnimatedWaveProgressBar>
     with SingleTickerProviderStateMixin {
   late final AnimationController _animationController;
+
+  bool _dragging = false;
 
   @override
   void initState() {
@@ -78,10 +75,12 @@ class _AnimatedWaveProgressBarState
 
     _animationController = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 4),
+      duration: const Duration(milliseconds: 2600),
     );
 
-    _updateAnimationState();
+    _animationController.addStatusListener(_handleAnimationStatus);
+
+    _syncAnimation();
   }
 
   @override
@@ -89,22 +88,35 @@ class _AnimatedWaveProgressBarState
     super.didUpdateWidget(oldWidget);
 
     if (oldWidget.isPlaying != widget.isPlaying) {
-      _updateAnimationState();
+      _syncAnimation();
     }
   }
 
-  void _updateAnimationState() {
+  void _handleAnimationStatus(AnimationStatus status) {
+    if (!mounted) {
+      return;
+    }
+
+    if (status == AnimationStatus.completed && widget.isPlaying) {
+      // Start the next cycle without allowing the animation to visibly pause.
+      _animationController.forward(from: 0.0);
+    }
+  }
+
+  void _syncAnimation() {
     if (widget.isPlaying) {
       if (!_animationController.isAnimating) {
-        _animationController.repeat();
+        _animationController.forward(from: _animationController.value);
       }
     } else {
+      // Stopping preserves the current animation phase.
       _animationController.stop();
     }
   }
 
   @override
   void dispose() {
+    _animationController.removeStatusListener(_handleAnimationStatus);
     _animationController.dispose();
     super.dispose();
   }
@@ -116,28 +128,27 @@ class _AnimatedWaveProgressBarState
       return 0.0;
     }
 
-    return (widget.position.inMilliseconds / durationMs)
-        .clamp(0.0, 1.0);
+    final positionMs = widget.position.inMilliseconds;
+
+    return (positionMs / durationMs).clamp(0.0, 1.0).toDouble();
   }
 
-  void _seekFromLocalPosition(
-    Offset localPosition,
-    double width,
-  ) {
-    final durationMs = widget.duration.inMilliseconds;
-
-    if (durationMs <= 0 || width <= 0) {
+  void _seekFromDx(double dx, double width) {
+    if (width <= 0) {
       return;
     }
 
-    final progress =
-        (localPosition.dx / width).clamp(0.0, 1.0);
+    final durationMs = widget.duration.inMilliseconds;
 
-    final newPosition = Duration(
-      milliseconds: (durationMs * progress).round(),
-    );
+    if (durationMs <= 0) {
+      return;
+    }
 
-    widget.onSeek(newPosition);
+    final progress = (dx / width).clamp(0.0, 1.0).toDouble();
+
+    final milliseconds = (durationMs * progress).round();
+
+    widget.onSeek(Duration(milliseconds: milliseconds));
   }
 
   @override
@@ -146,26 +157,39 @@ class _AnimatedWaveProgressBarState
       builder: (context, constraints) {
         final width = constraints.maxWidth;
 
+        if (!width.isFinite || width <= 0) {
+          return const SizedBox.shrink();
+        }
+
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
+
           onTapDown: (details) {
-            _seekFromLocalPosition(
-              details.localPosition,
-              width,
-            );
+            _seekFromDx(details.localPosition.dx, width);
           },
+
           onHorizontalDragStart: (details) {
-            _seekFromLocalPosition(
-              details.localPosition,
-              width,
-            );
+            _dragging = true;
+
+            _seekFromDx(details.localPosition.dx, width);
           },
+
           onHorizontalDragUpdate: (details) {
-            _seekFromLocalPosition(
-              details.localPosition,
-              width,
-            );
+            if (!_dragging) {
+              return;
+            }
+
+            _seekFromDx(details.localPosition.dx, width);
           },
+
+          onHorizontalDragEnd: (_) {
+            _dragging = false;
+          },
+
+          onHorizontalDragCancel: () {
+            _dragging = false;
+          },
+
           child: SizedBox(
             width: double.infinity,
             height: widget.height,
@@ -173,19 +197,23 @@ class _AnimatedWaveProgressBarState
               animation: _animationController,
               builder: (context, child) {
                 return CustomPaint(
-                  size: Size(width, widget.height),
                   painter: _WaveProgressPainter(
                     progress: _progress,
-                    animationValue:
-                        _animationController.value,
+                    animationValue: _animationController.value,
+
                     waveHeight: widget.waveHeight,
                     trackHeight: widget.trackHeight,
                     handleRadius: widget.handleRadius,
+
                     waveColor: widget.waveColor,
-                    waveHighlightColor:
-                        widget.waveHighlightColor,
+                    waveHighlightColor: widget.waveHighlightColor,
+                    waveSecondaryColor: widget.waveSecondaryColor,
+
                     trackColor: widget.trackColor,
+
                     handleColor: widget.handleColor,
+                    handleCenterColor: widget.handleCenterColor,
+
                     showHandle: widget.showHandle,
                   ),
                 );
@@ -199,123 +227,222 @@ class _AnimatedWaveProgressBarState
 }
 
 class _WaveProgressPainter extends CustomPainter {
-  _WaveProgressPainter({
+  const _WaveProgressPainter({
     required this.progress,
     required this.animationValue,
+
     required this.waveHeight,
     required this.trackHeight,
     required this.handleRadius,
+
     required this.waveColor,
     required this.waveHighlightColor,
+    required this.waveSecondaryColor,
+
     required this.trackColor,
+
     required this.handleColor,
+    required this.handleCenterColor,
+
     required this.showHandle,
   });
 
   final double progress;
   final double animationValue;
+
   final double waveHeight;
   final double trackHeight;
   final double handleRadius;
 
   final Color waveColor;
   final Color waveHighlightColor;
+  final Color waveSecondaryColor;
+
   final Color trackColor;
+
   final Color handleColor;
+  final Color handleCenterColor;
+
   final bool showHandle;
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (size.width <= 0 || size.height <= 0) {
+      return;
+    }
+
     final centerY = size.height / 2;
-    final playedWidth =
-        (size.width * progress).clamp(0.0, size.width);
+
+    final playedWidth = (size.width * progress)
+        .clamp(0.0, size.width)
+        .toDouble();
 
     // ------------------------------------------------------------
-    // Background track
+    // UNPLAYED TRACK
     // ------------------------------------------------------------
 
-    final backgroundPaint = Paint()
+    final trackTop = centerY - trackHeight / 2;
+
+    final trackRect = Rect.fromLTWH(0, trackTop, size.width, trackHeight);
+
+    final trackPaint = Paint()
       ..color = trackColor
       ..style = PaintingStyle.fill;
 
-    final backgroundRect = RRect.fromRectAndRadius(
-      Rect.fromLTWH(
-        0,
-        centerY - trackHeight / 2,
-        size.width,
-        trackHeight,
-      ),
-      Radius.circular(trackHeight),
-    );
-
     canvas.drawRRect(
-      backgroundRect,
-      backgroundPaint,
+      RRect.fromRectAndRadius(trackRect, Radius.circular(trackHeight)),
+      trackPaint,
     );
 
     // ------------------------------------------------------------
-    // Played section + 3 animated wave layers
+    // PLAYED WAVE REGION
     // ------------------------------------------------------------
 
     if (playedWidth > 0) {
       canvas.save();
 
-      canvas.clipRect(
+      // The played region is a rounded capsule.
+      final playedRect = Rect.fromLTWH(
+        0,
+        centerY - waveHeight * 1.65,
+        playedWidth,
+        waveHeight * 3.3,
+      );
+
+      final playedRadius = Radius.circular(waveHeight * 1.65);
+
+      canvas.clipRRect(RRect.fromRectAndRadius(playedRect, playedRadius));
+
+      // Strong pink base.
+      final basePaint = Paint()
+        ..color = waveColor
+        ..style = PaintingStyle.fill;
+
+      canvas.drawRect(
         Rect.fromLTWH(
           0,
-          0,
+          centerY - waveHeight * 1.65,
           playedWidth,
-          size.height,
+          waveHeight * 3.3,
         ),
+        basePaint,
       );
 
-      // Back wave
+      // Three waves.
+      //
+      // Bottom = strongest.
+      // Middle = softer.
+      // Top = subtle/highlight.
       _drawWave(
         canvas,
         size,
         centerY,
-        layer: 0,
-        amplitude: waveHeight,
-        frequency: 0.010,
-        speed: 0.85,
-        opacity: 0.72,
+        playedWidth,
+
+        amplitude: waveHeight * 0.72,
+        frequency: 0.014,
+        speed: 1.00,
+        phaseOffset: 0.0,
+
+        color: waveColor,
+        opacity: 0.95,
+
+        verticalOffset: waveHeight * 0.55,
       );
 
-      // Middle wave
       _drawWave(
         canvas,
         size,
         centerY,
-        layer: 1,
-        amplitude: waveHeight * 0.82,
-        frequency: 0.013,
-        speed: 0.62,
-        opacity: 0.84,
+        playedWidth,
+
+        amplitude: waveHeight * 0.58,
+        frequency: 0.011,
+        speed: 0.72,
+        phaseOffset: 2.0,
+
+        color: waveSecondaryColor,
+        opacity: 0.68,
+
+        verticalOffset: -waveHeight * 0.05,
       );
 
-      // Front wave
       _drawWave(
         canvas,
         size,
         centerY,
-        layer: 2,
-        amplitude: waveHeight * 0.62,
-        frequency: 0.016,
-        speed: 1.15,
-        opacity: 1.0,
+        playedWidth,
+
+        amplitude: waveHeight * 0.46,
+        frequency: 0.0085,
+        speed: 0.48,
+        phaseOffset: 4.1,
+
+        color: waveHighlightColor,
+        opacity: 0.62,
+
+        verticalOffset: -waveHeight * 0.58,
       );
 
       canvas.restore();
     }
 
     // ------------------------------------------------------------
-    // Seek handle
+    // SEEK HANDLE
     // ------------------------------------------------------------
 
     if (showHandle) {
-      _drawHandle(
-        canvas,
-        Offset(playedWidth, centerY),
+      final handleX = playedWidth;
+
+      // Outer soft glow.
+      final glowPaint = Paint()
+        ..color = handleCenterColor.withValues(alpha: 0.32)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 9);
+
+      canvas.drawCircle(Offset(handleX, centerY), handleRadius + 5, glowPaint);
+
+      // Second subtle glow ring.
+      final outerGlowPaint = Paint()
+        ..color = handleCenterColor.withValues(alpha: 0.18)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
+
+      canvas.drawCircle(
+        Offset(handleX, centerY),
+        handleRadius + 8,
+        outerGlowPaint,
+      );
+
+      // White outer handle.
+      final handlePaint = Paint()
+        ..color = handleColor
+        ..style = PaintingStyle.fill;
+
+      canvas.drawCircle(
+        Offset(handleX, centerY),
+        handleRadius + 2,
+        handlePaint,
+      );
+
+      // Pink center.
+      final centerPaint = Paint()
+        ..color = handleCenterColor
+        ..style = PaintingStyle.fill;
+
+      canvas.drawCircle(
+        Offset(handleX, centerY),
+        handleRadius * 0.48,
+        centerPaint,
+      );
+
+      // Tiny white center highlight.
+      final highlightPaint = Paint()
+        ..color = Colors.white.withValues(alpha: 0.65)
+        ..style = PaintingStyle.fill;
+
+      canvas.drawCircle(
+        Offset(handleX - handleRadius * 0.14, centerY - handleRadius * 0.14),
+        handleRadius * 0.13,
+        highlightPaint,
       );
     }
   }
@@ -323,127 +450,73 @@ class _WaveProgressPainter extends CustomPainter {
   void _drawWave(
     Canvas canvas,
     Size size,
-    double centerY, {
-    required int layer,
+    double centerY,
+    double playedWidth, {
     required double amplitude,
     required double frequency,
     required double speed,
+    required double phaseOffset,
+    required Color color,
     required double opacity,
+    required double verticalOffset,
   }) {
+    if (playedWidth <= 0) {
+      return;
+    }
+
     final path = Path();
 
-    final phase =
-        animationValue * math.pi * 2 * speed;
+    final phase = animationValue * math.pi * 2 * speed;
 
-    final layerPhase = layer * 1.35;
+    path.moveTo(0, centerY + verticalOffset);
 
-    path.moveTo(0, centerY);
+    // Slightly finer sampling gives the wave a smoother
+    // appearance on high-density displays.
+    for (double x = 0; x <= playedWidth + 4; x += 2.0) {
+      final wave1 = math.sin(x * frequency + phase + phaseOffset) * amplitude;
 
-    for (double x = 0; x <= size.width; x += 2.5) {
-      final wave1 = math.sin(
-            x * frequency +
-                phase +
-                layerPhase,
-          ) *
-          amplitude;
-
-      final wave2 = math.sin(
-            x * frequency * 0.48 +
-                phase * 0.72 +
-                layerPhase * 1.7,
-          ) *
+      final wave2 =
+          math.sin(x * frequency * 0.47 + phase * 0.68 + phaseOffset * 1.35) *
           amplitude *
-          0.42;
+          0.30;
 
-      final wave3 = math.sin(
-            x * frequency * 1.8 -
-                phase * 0.38 +
-                layer,
-          ) *
+      final wave3 =
+          math.sin(x * frequency * 1.72 - phase * 0.42 + phaseOffset * 0.5) *
           amplitude *
-          0.14;
+          0.10;
 
-      final y =
-          centerY +
-          wave1 +
-          wave2 +
-          wave3;
+      final y = centerY + verticalOffset + wave1 + wave2 + wave3;
 
       path.lineTo(x, y);
     }
 
-    path.lineTo(size.width, centerY);
-    path.lineTo(0, centerY);
+    // Fill the wave down to the bottom.
+    path.lineTo(playedWidth, size.height);
+
+    path.lineTo(0, size.height);
+
     path.close();
 
     final paint = Paint()
-      ..color = (layer == 2
-              ? waveHighlightColor
-              : waveColor)
-          .withOpacity(opacity)
+      ..color = color.withValues(alpha: opacity)
       ..style = PaintingStyle.fill;
 
     canvas.drawPath(path, paint);
   }
 
-  void _drawHandle(
-    Canvas canvas,
-    Offset position,
-  ) {
-    // Soft outer glow.
-    final glowPaint = Paint()
-      ..color = handleColor.withOpacity(0.42)
-      ..maskFilter = const MaskFilter.blur(
-        BlurStyle.normal,
-        8,
-      );
-
-    canvas.drawCircle(
-      position,
-      handleRadius + 2,
-      glowPaint,
-    );
-
-    // Main handle.
-    final handlePaint = Paint()
-      ..color = handleColor
-      ..style = PaintingStyle.fill;
-
-    canvas.drawCircle(
-      position,
-      handleRadius,
-      handlePaint,
-    );
-
-    // Small upper-left highlight.
-    final highlightPaint = Paint()
-      ..color = Colors.white.withOpacity(0.38)
-      ..style = PaintingStyle.fill;
-
-    canvas.drawCircle(
-      Offset(
-        position.dx - handleRadius * 0.28,
-        position.dy - handleRadius * 0.30,
-      ),
-      handleRadius * 0.20,
-      highlightPaint,
-    );
-  }
-
   @override
-  bool shouldRepaint(
-    covariant _WaveProgressPainter oldDelegate,
-  ) {
+  bool shouldRepaint(covariant _WaveProgressPainter oldDelegate) {
     return oldDelegate.progress != progress ||
         oldDelegate.animationValue != animationValue ||
         oldDelegate.waveHeight != waveHeight ||
         oldDelegate.trackHeight != trackHeight ||
         oldDelegate.handleRadius != handleRadius ||
         oldDelegate.waveColor != waveColor ||
-        oldDelegate.waveHighlightColor !=
-            waveHighlightColor ||
+        oldDelegate.waveHighlightColor != waveHighlightColor ||
+        oldDelegate.waveSecondaryColor != waveSecondaryColor ||
         oldDelegate.trackColor != trackColor ||
         oldDelegate.handleColor != handleColor ||
+        oldDelegate.handleCenterColor != handleCenterColor ||
         oldDelegate.showHandle != showHandle;
   }
 }

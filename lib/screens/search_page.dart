@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../audio/audio_library.dart';
-import '../widgets/glass_surface.dart';
 import '../widgets/music_visual.dart';
 import '../widgets/player_bar.dart';
 import '../widgets/track_actions.dart';

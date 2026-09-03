@@ -6,6 +6,7 @@ import 'package:music_player_app/screens/search_page.dart';
 import '../audio/audio_library.dart';
 import '../utils/responsive.dart';
 import '../theme/theme_provider.dart';
+import '../widgets/glass_surface.dart';
 import '../widgets/player_bar.dart';
 import '../widgets/music_visual.dart';
 import '../widgets/track_actions.dart';
@@ -13,12 +14,6 @@ import 'collection_page.dart';
 import 'library_page.dart';
 import 'settings_page.dart';
 
-/// Home shell redesigned from scratch.
-///
-/// IMPORTANT:
-/// - Existing audio/library/navigation logic is intentionally preserved.
-/// - This file does not use GlassBackground or GlassSurface.
-/// - Visual styling is completely independent from the previous UI.
 class HomePage extends StatefulWidget {
   const HomePage({
     required this.themeProvider,
@@ -39,9 +34,11 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+
     _restoreLibraryThenScanIfNeeded();
 
     final now = DateTime.now();
+
     final nextMinute = DateTime(
       now.year,
       now.month,
@@ -51,26 +48,31 @@ class _HomePageState extends State<HomePage> {
     );
 
     _greetingTimer = Timer(nextMinute.difference(now), () {
-      if (!mounted) return;
-      setState(() {});
-      _scheduleGreetingRefresh();
+      if (mounted) {
+        setState(() {});
+      }
+
+      if (mounted) {
+        _scheduleGreetingRefresh();
+      }
     });
   }
 
   Future<void> _restoreLibraryThenScanIfNeeded() async {
+    // The cached library is restored first so opening the app never waits for
+    // a device-wide music scan. New songs are discovered silently afterward.
     await widget.audioLibrary.ready;
 
-    if (!mounted || widget.audioLibrary.tracks.isNotEmpty) {
-      return;
-    }
+    if (!mounted) return;
 
-    await widget.audioLibrary.scanDeviceMusic();
+    unawaited(widget.audioLibrary.scanForNewSongsInBackground());
   }
 
   void _scheduleGreetingRefresh() {
     _greetingTimer?.cancel();
 
     final now = DateTime.now();
+
     final nextMinute = DateTime(
       now.year,
       now.month,
@@ -80,9 +82,13 @@ class _HomePageState extends State<HomePage> {
     );
 
     _greetingTimer = Timer(nextMinute.difference(now), () {
-      if (!mounted) return;
-      setState(() {});
-      _scheduleGreetingRefresh();
+      if (mounted) {
+        setState(() {});
+      }
+
+      if (mounted) {
+        _scheduleGreetingRefresh();
+      }
     });
   }
 
@@ -99,7 +105,11 @@ class _HomePageState extends State<HomePage> {
     return DefaultTabController(
       length: 5,
       child: Scaffold(
-        backgroundColor: _StudioColors.background(context),
+        backgroundColor: _OneMusicColors.background(context),
+
+        // ---------------------------------------------------------------
+        // EXISTING PLAYER BAR
+        // ---------------------------------------------------------------
         bottomNavigationBar: ListenableBuilder(
           listenable: widget.audioLibrary,
           builder: (context, child) {
@@ -116,107 +126,203 @@ class _HomePageState extends State<HomePage> {
             );
           },
         ),
-        body: Stack(
-          children: [
-            // A restrained ambient glow replaces the old glass/background system.
-            Positioned(
-              top: -170,
-              right: -150,
-              child: ListenableBuilder(
-                listenable: widget.audioLibrary,
-                builder: (context, _) {
-                  final accent = widget.audioLibrary.nowPlayingAccent;
-                  if (accent == null) return const SizedBox.shrink();
 
-                  return IgnorePointer(
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 700),
-                      curve: Curves.easeOutCubic,
-                      width: 420,
-                      height: 420,
+        // ---------------------------------------------------------------
+        // EXISTING DYNAMIC ARTWORK BACKGROUND
+        // ---------------------------------------------------------------
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            Positioned.fill(
+              child: IgnorePointer(
+                child: ListenableBuilder(
+                  listenable: widget.audioLibrary,
+                  builder: (context, _) {
+                    final accent = widget.audioLibrary.nowPlayingAccent;
+
+                    if (accent == null) {
+                      return const SizedBox.shrink();
+                    }
+
+                    return AnimatedContainer(
+                      duration: const Duration(milliseconds: 850),
+                      curve: Curves.easeInOutCubic,
                       decoration: BoxDecoration(
-                        shape: BoxShape.circle,
                         gradient: RadialGradient(
+                          center: const Alignment(0.0, -0.30),
+                          radius: 1.15,
                           colors: [
-                            accent.withValues(alpha: 0.12),
-                            accent.withValues(alpha: 0.035),
+                            accent.withValues(alpha: 0.46),
+                            accent.withValues(alpha: 0.25),
+                            accent.withValues(alpha: 0.10),
+                            Colors.transparent,
+                          ],
+                          stops: const [0.0, 0.34, 0.68, 1.0],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+            Positioned.fill(
+              child: IgnorePointer(
+                child: ListenableBuilder(
+                  listenable: widget.audioLibrary,
+                  builder: (context, _) {
+                    final accent = widget.audioLibrary.nowPlayingAccent;
+
+                    if (accent == null) {
+                      return const SizedBox.shrink();
+                    }
+
+                    return AnimatedContainer(
+                      duration: const Duration(milliseconds: 850),
+                      curve: Curves.easeInOutCubic,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          stops: const [0.0, 0.30, 0.70, 1.0],
+                          colors: [
+                            accent.withValues(alpha: 0.18),
+                            accent.withValues(alpha: 0.10),
+                            Colors.transparent,
                             Colors.transparent,
                           ],
                         ),
                       ),
-                    ),
-                  );
-                },
+                    );
+                  },
+                ),
               ),
             ),
+            GlassBackground(
+              accentListenable: widget.audioLibrary,
+              accentProvider: () => widget.audioLibrary.nowPlayingAccent,
+              child: RefreshIndicator(
+                color: _OneMusicColors.accent(context),
+                onRefresh: () async {
+                  await widget.audioLibrary.scanDeviceMusic();
+                },
+                child: Padding(
+                  // Same original responsive structure.
+                  padding: EdgeInsets.fromLTRB(
+                    r.horizontalPadding,
+                    14,
+                    r.horizontalPadding,
+                    2,
+                  ),
+                  child: Column(
+                    children: [
+                      // =======================================================
+                      // HEADER
+                      // =======================================================
 
-            SafeArea(
-              bottom: false,
-              child: Column(
-                children: [
-                  Padding(
-                    padding: EdgeInsets.fromLTRB(
-                      r.horizontalPadding,
-                      r.value(mobile: 10, tablet: 14, desktop: 18),
-                      r.horizontalPadding,
-                      0,
-                    ),
-                    child: _StudioHeader(
-                      onSearch: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) =>
-                                SearchPage(audioLibrary: widget.audioLibrary),
+                      SafeArea(
+                        bottom: false,
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: r.value(
+                              mobile: 4,
+                              tablet: 8,
+                              desktop: 10,
+                            ),
                           ),
-                        );
-                      },
-                      onSettings: () => _openSettings(context),
-                    ),
-                  ),
+                          child: Row(
+                            children: [
+                              Text(
+                                'Music',
+                                style: TextStyle(
+                                  color: _OneMusicColors.textPrimary(context),
+                                  fontSize: r.font(30),
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: -1.15,
+                                  height: 1,
+                                ),
+                              ),
 
-                  SizedBox(
-                    height: r.value(mobile: 24, tablet: 28, desktop: 34),
-                  ),
+                              const Spacer(),
 
-                  Padding(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: r.horizontalPadding,
-                    ),
-                    child: const _StudioTabs(),
-                  ),
+                              _MinimalHeaderButton(
+                                icon: Icons.search_rounded,
+                                tooltip: 'Search',
+                                onPressed: () {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => SearchPage(
+                                        audioLibrary: widget.audioLibrary,
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
 
-                  SizedBox(
-                    height: r.value(mobile: 18, tablet: 22, desktop: 26),
-                  ),
+                              SizedBox(width: r.scale(8)),
 
-                  Expanded(
-                    child: TabBarView(
-                      children: [
-                        _StudioDiscoverTab(audioLibrary: widget.audioLibrary),
-                        CollectionPage(
-                          title: 'Albums',
-                          icon: Icons.album_rounded,
-                          audioLibrary: widget.audioLibrary,
+                              _MinimalHeaderButton(
+                                icon: Icons.settings_outlined,
+                                tooltip: 'Settings',
+                                onPressed: () => _openSettings(context),
+                              ),
+                            ],
+                          ),
                         ),
-                        CollectionPage(
-                          title: 'Artists',
-                          icon: Icons.person_2_rounded,
-                          audioLibrary: widget.audioLibrary,
+                      ),
+
+                      SizedBox(
+                        height: r.value(mobile: 28, tablet: 30, desktop: 32),
+                      ),
+
+                      // =======================================================
+                      // NAVIGATION
+                      // =======================================================
+                      _CleanPillTabBar(),
+
+                      SizedBox(
+                        height: r.value(mobile: 28, tablet: 30, desktop: 32),
+                      ),
+
+                      // =======================================================
+                      // CONTENT
+                      // =======================================================
+                      Expanded(
+                        child: TabBarView(
+                          children: [
+                            _HomeSongsTab(
+                              themeProvider: widget.themeProvider,
+                              audioLibrary: widget.audioLibrary,
+                            ),
+
+                            CollectionPage(
+                              title: 'Albums',
+                              icon: Icons.album_rounded,
+                              audioLibrary: widget.audioLibrary,
+                            ),
+
+                            CollectionPage(
+                              title: 'Artists',
+                              icon: Icons.person_2_rounded,
+                              audioLibrary: widget.audioLibrary,
+                            ),
+
+                            CollectionPage(
+                              title: 'Playlists',
+                              icon: Icons.queue_music_rounded,
+                              audioLibrary: widget.audioLibrary,
+                            ),
+
+                            CollectionPage(
+                              title: 'Liked songs',
+                              icon: Icons.favorite_rounded,
+                              audioLibrary: widget.audioLibrary,
+                            ),
+                          ],
                         ),
-                        CollectionPage(
-                          title: 'Playlists',
-                          icon: Icons.queue_music_rounded,
-                          audioLibrary: widget.audioLibrary,
-                        ),
-                        CollectionPage(
-                          title: 'Liked songs',
-                          icon: Icons.favorite_rounded,
-                          audioLibrary: widget.audioLibrary,
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
           ],
@@ -238,329 +344,473 @@ class _HomePageState extends State<HomePage> {
 }
 
 // ============================================================================
-// STUDIO THEME
+// DESIGN COLORS
 // ============================================================================
 
-class _StudioColors {
+class _OneMusicColors {
+  // Compatibility layer for the existing HomePage.
+  //
+  // The actual colors come from ThemeData, which is generated by AppTheme.
+  // Keep these names so the rest of HomePage does not need to change.
+
   static Color background(BuildContext context) {
-    final theme = Theme.of(context);
-    return theme.brightness == Brightness.dark
-        ? const Color(0xFF0B0714)
-        : const Color(0xFFF9EFF7);
+    return Theme.of(context).scaffoldBackgroundColor;
   }
 
-  static Color panel(BuildContext context) {
-    final theme = Theme.of(context);
-    return theme.brightness == Brightness.dark
-        ? const Color(0xFF151020)
-        : const Color(0xFFFFF8FC);
+  static Color surface(BuildContext context) {
+    return Theme.of(context).colorScheme.surface;
   }
 
-  static Color text(BuildContext context) =>
-      Theme.of(context).colorScheme.onSurface;
-
-  static Color secondary(BuildContext context) =>
-      Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.58);
-
-  static Color muted(BuildContext context) =>
-      Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.35);
-
-  static Color accent(BuildContext context) =>
-      Theme.of(context).colorScheme.primary;
-}
-
-// ============================================================================
-// HEADER
-// ============================================================================
-
-class _StudioHeader extends StatelessWidget {
-  const _StudioHeader({required this.onSearch, required this.onSettings});
-
-  final VoidCallback onSearch;
-  final VoidCallback onSettings;
-
-  @override
-  Widget build(BuildContext context) {
-    final r = context.responsive;
-
-    return Row(
-      children: [
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Music',
-              style: TextStyle(
-                color: _StudioColors.text(context),
-                fontSize: r.value(mobile: 30, tablet: 32, desktop: 34),
-                fontWeight: FontWeight.w800,
-                height: 1.0,
-                letterSpacing: -1.0,
-              ),
-            ),
-          ],
-        ),
-        const Spacer(),
-        _HeaderIconButton(icon: Icons.search_rounded, onPressed: onSearch),
-        SizedBox(width: r.scale(5)),
-        _HeaderIconButton(icon: Icons.settings_outlined, onPressed: onSettings),
-      ],
-    );
+  static Color textPrimary(BuildContext context) {
+    return Theme.of(context).colorScheme.onSurface;
   }
 
-  String _greeting() {
-    final hour = DateTime.now().hour;
-    if (hour < 12) return 'GOOD MORNING';
-    if (hour < 18) return 'GOOD AFTERNOON';
-    return 'GOOD EVENING';
+  static Color secondary(BuildContext context) {
+    return Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.66);
+  }
+
+  static Color muted(BuildContext context) {
+    return Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.42);
+  }
+
+  static Color accent(BuildContext context) {
+    return Theme.of(context).colorScheme.primary;
+  }
+
+  static Color glass(BuildContext context) {
+    final brightness = Theme.of(context).brightness;
+
+    return brightness == Brightness.dark
+        ? Colors.white.withValues(alpha: 0.055)
+        : Colors.white.withValues(alpha: 0.48);
+  }
+
+  static Color glassStrong(BuildContext context) {
+    final brightness = Theme.of(context).brightness;
+
+    return brightness == Brightness.dark
+        ? Colors.white.withValues(alpha: 0.085)
+        : Colors.white.withValues(alpha: 0.68);
+  }
+
+  static Color glassBorder(BuildContext context) {
+    final brightness = Theme.of(context).brightness;
+
+    return brightness == Brightness.dark
+        ? Colors.white.withValues(alpha: 0.075)
+        : Colors.black.withValues(alpha: 0.065);
   }
 }
 
-class _HeaderIconButton extends StatelessWidget {
-  const _HeaderIconButton({required this.icon, required this.onPressed});
+// ============================================================================
+// MINIMAL HEADER BUTTON
+// ============================================================================
+
+class _MinimalHeaderButton extends StatelessWidget {
+  const _MinimalHeaderButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onPressed,
+  });
 
   final IconData icon;
+  final String tooltip;
   final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
     final r = context.responsive;
 
-    return IconButton(
-      onPressed: onPressed,
-      splashRadius: r.scale(22),
-      icon: Icon(icon, size: r.icon(24), color: _StudioColors.text(context)),
+    return Tooltip(
+      message: tooltip,
+      child: IconButton(
+        onPressed: onPressed,
+        tooltip: tooltip,
+        splashRadius: r.scale(23),
+        padding: EdgeInsets.all(r.scale(7)),
+        constraints: BoxConstraints(
+          minWidth: r.value(mobile: 44, tablet: 46, desktop: 48),
+          minHeight: r.value(mobile: 44, tablet: 46, desktop: 48),
+        ),
+        icon: Icon(
+          icon,
+          size: r.icon(25),
+          color: _OneMusicColors.textPrimary(context),
+        ),
+      ),
     );
   }
 }
 
-// ============================================================================
-// TAB NAVIGATION
-// ============================================================================
-
-class _StudioTabs extends StatelessWidget {
-  const _StudioTabs();
+class _CleanPillTabBar extends StatelessWidget {
+  const _CleanPillTabBar();
 
   @override
   Widget build(BuildContext context) {
     final r = context.responsive;
-    final accent = _StudioColors.accent(context);
+    final accent = _OneMusicColors.accent(context);
 
     return SizedBox(
-      height: r.value(mobile: 58, tablet: 60, desktop: 62),
+      height: r.value(mobile: 52, tablet: 54, desktop: 56),
       child: TabBar(
         isScrollable: true,
         tabAlignment: TabAlignment.start,
         dividerColor: Colors.transparent,
-        indicator: BoxDecoration(
-          color: accent.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(30),
-          border: Border.all(color: accent.withValues(alpha: 0.16), width: 1),
-        ),
         indicatorSize: TabBarIndicatorSize.tab,
-        indicatorPadding: const EdgeInsets.symmetric(vertical: 4),
-        labelColor: accent,
-        unselectedLabelColor: _StudioColors.secondary(context),
         labelPadding: EdgeInsets.symmetric(
-          horizontal: r.value(mobile: 17, tablet: 20, desktop: 22),
+          horizontal: r.value(mobile: 2, tablet: 3, desktop: 4),
         ),
+        indicator: BoxDecoration(
+          color: Colors.white.withValues(
+            alpha: Theme.of(context).brightness == Brightness.dark
+                ? 0.055
+                : 0.42,
+          ),
+          borderRadius: BorderRadius.circular(r.radius(26)),
+          border: Border.all(
+            color: Colors.white.withValues(
+              alpha: Theme.of(context).brightness == Brightness.dark
+                  ? 0.075
+                  : 0.58,
+            ),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: accent.withValues(alpha: 0.10),
+              blurRadius: 18,
+              offset: const Offset(0, 7),
+            ),
+          ],
+        ),
+        labelColor: accent,
+        unselectedLabelColor: _OneMusicColors.textPrimary(context)
+            .withValues(alpha: 0.66),
         labelStyle: TextStyle(
-          fontSize: r.font(13.5),
+          fontSize: r.font(14),
           fontWeight: FontWeight.w700,
         ),
         unselectedLabelStyle: TextStyle(
-          fontSize: r.font(13.5),
+          fontSize: r.font(14),
           fontWeight: FontWeight.w500,
         ),
         tabs: const [
-          _PillTab('Discover'),
-          _PillTab('Albums'),
-          _PillTab('Artists'),
-          _PillTab('Playlists'),
-          _PillTab('Liked'),
+          _TabPill(icon: Icons.auto_awesome_rounded, label: 'Discover'),
+          _TabPill(icon: Icons.album_rounded, label: 'Albums'),
+          _TabPill(icon: Icons.person_2_outlined, label: 'Artists'),
+          _TabPill(icon: Icons.queue_music_rounded, label: 'Playlists'),
+          _TabPill(icon: Icons.favorite_border_rounded, label: 'Liked'),
         ],
       ),
     );
   }
 }
 
-class _PillTab extends StatelessWidget {
-  const _PillTab(this.label);
+class _TabPill extends StatelessWidget {
+  const _TabPill({required this.icon, required this.label});
 
+  final IconData icon;
   final String label;
 
   @override
   Widget build(BuildContext context) {
-    return Tab(child: Text(label));
+    final r = context.responsive;
+
+    return Tab(
+      height: r.value(mobile: 44, tablet: 46, desktop: 48),
+      child: Padding(
+        padding: EdgeInsets.symmetric(
+          horizontal: r.value(mobile: 13, tablet: 15, desktop: 17),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: r.icon(17)),
+            SizedBox(width: r.scale(6)),
+            Text(label),
+          ],
+        ),
+      ),
+    );
   }
 }
 
-// ============================================================================
-// DISCOVER
-// ============================================================================
+class _HomeSongsTab extends StatelessWidget {
+  const _HomeSongsTab({
+    required this.themeProvider,
+    required this.audioLibrary,
+  });
 
-class _StudioDiscoverTab extends StatelessWidget {
-  const _StudioDiscoverTab({required this.audioLibrary});
-
+  final ThemeProvider themeProvider;
   final AudioLibraryController audioLibrary;
 
   @override
   Widget build(BuildContext context) {
     final r = context.responsive;
 
-    return RefreshIndicator(
-      color: _StudioColors.accent(context),
-      onRefresh: audioLibrary.scanDeviceMusic,
-      child: ListenableBuilder(
-        listenable: audioLibrary,
-        builder: (context, _) {
-          final tracks = audioLibrary.tracks;
-          final recent = audioLibrary.recentlyPlayed;
+    return ListenableBuilder(
+      listenable: audioLibrary,
+      builder: (context, child) {
+        final tracks = audioLibrary.tracks;
+        final recentlyPlayed = audioLibrary.recentlyPlayed;
 
-          return CustomScrollView(
-            physics: const AlwaysScrollableScrollPhysics(
-              parent: BouncingScrollPhysics(),
-            ),
-            slivers: [
-              SliverPadding(
-                padding: EdgeInsets.fromLTRB(
-                  r.horizontalPadding,
-                  0,
-                  r.horizontalPadding,
-                  110,
+        return CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.symmetric(
+                  horizontal: r.value(mobile: 0, tablet: 4, desktop: 8),
                 ),
-                sliver: SliverList(
-                  delegate: SliverChildListDelegate([
-                    if (recent.isNotEmpty) ...[
-                      _SectionTitle(
-                        title: 'Recently Played',
-                        action: 'See all',
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => _RecentlyPlayedPage(
-                                audioLibrary: audioLibrary,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // =========================================================
+                    // RECENTLY PLAYED
+                    // =========================================================
+
+                    if (recentlyPlayed.isNotEmpty) ...[
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Text(
+                            'Recently Played',
+                            style: TextStyle(
+                              color: _OneMusicColors.textPrimary(context),
+                              fontSize: r.font(18),
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: -0.35,
+                            ),
+                          ),
+                          const Spacer(),
+                          GestureDetector(
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => _RecentlyPlayedPage(
+                                    audioLibrary: audioLibrary,
+                                  ),
+                                ),
+                              );
+                            },
+                            behavior: HitTestBehavior.opaque,
+                            child: Padding(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: r.scale(2),
+                                vertical: r.scale(5),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    'See all',
+                                    style: TextStyle(
+                                      color: _OneMusicColors.accent(context),
+                                      fontSize: r.font(13),
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  SizedBox(width: r.scale(4)),
+                                  Icon(
+                                    Icons.chevron_right_rounded,
+                                    color: _OneMusicColors.accent(context),
+                                    size: r.icon(18),
+                                  ),
+                                ],
                               ),
                             ),
-                          );
-                        },
+                          ),
+                        ],
                       ),
-                      SizedBox(height: r.scale(12)),
+
+                      SizedBox(height: r.scale(14)),
+
                       SizedBox(
-                        height: r.value(mobile: 188, tablet: 216, desktop: 238),
+                        height: r.value(mobile: 196, tablet: 214, desktop: 236),
                         child: ListView.separated(
                           scrollDirection: Axis.horizontal,
                           clipBehavior: Clip.none,
-                          itemCount: recent.length,
-                          separatorBuilder: (_, __) =>
-                              SizedBox(width: r.scale(16)),
+                          itemCount: recentlyPlayed.length,
+                          separatorBuilder: (_, _) => SizedBox(
+                            width: r.value(mobile: 14, tablet: 16, desktop: 18),
+                          ),
                           itemBuilder: (context, index) {
-                            return _RecentArtworkCard(
-                              track: recent[index],
+                            return _RecentlyPlayedCard(
+                              track: recentlyPlayed[index],
                               controller: audioLibrary,
                             );
                           },
                         ),
                       ),
-                      SizedBox(height: r.scale(30)),
+
+                      SizedBox(
+                        height: r.value(mobile: 28, tablet: 32, desktop: 36),
+                      ),
                     ],
 
-                    Row(
-                      children: [
-                        Text(
-                          'All songs',
-                          style: TextStyle(
-                            color: _StudioColors.text(context),
-                            fontSize: r.font(20),
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: -0.5,
+                    // =========================================================
+                    // YOUR TRACKS
+                    // =========================================================
+                    if (tracks.isNotEmpty)
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Text(
+                            'Your Tracks',
+                            style: TextStyle(
+                              color: _OneMusicColors.textPrimary(context),
+                              fontSize: r.font(18),
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: -0.35,
+                            ),
                           ),
-                        ),
-                        const Spacer(),
-                        _ShuffleButton(controller: audioLibrary),
-                      ],
-                    ),
+
+                          const Spacer(),
+
+                          Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: () {
+                                audioLibrary.toggleShuffle(
+                                  !audioLibrary.shuffleEnabled,
+                                );
+                              },
+                              borderRadius: BorderRadius.circular(r.radius(24)),
+                              child: Container(
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: r.value(
+                                    mobile: 14,
+                                    tablet: 16,
+                                    desktop: 18,
+                                  ),
+                                  vertical: r.value(
+                                    mobile: 9,
+                                    tablet: 10,
+                                    desktop: 11,
+                                  ),
+                                ),
+                                decoration: BoxDecoration(
+                                  color: audioLibrary.shuffleEnabled
+                                      ? _OneMusicColors.accent(context)
+                                            .withValues(alpha: 0.12)
+                                      : _OneMusicColors.glass(context),
+                                  borderRadius: BorderRadius.circular(
+                                    r.radius(24),
+                                  ),
+                                  border: Border.all(
+                                    color: audioLibrary.shuffleEnabled
+                                        ? _OneMusicColors.accent(context)
+                                              .withValues(alpha: 0.18)
+                                        : _OneMusicColors.glassBorder(context),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.shuffle_rounded,
+                                      size: r.icon(17),
+                                      color: _OneMusicColors.accent(context),
+                                    ),
+                                    SizedBox(width: r.scale(6)),
+                                    Text(
+                                      'Shuffle',
+                                      style: TextStyle(
+                                        color: _OneMusicColors.accent(context),
+                                        fontSize: r.font(13),
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+
                     SizedBox(height: r.scale(12)),
-                  ]),
+                  ],
+                ),
+              ),
+            ),
+
+            if (tracks.isEmpty)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.only(top: r.scale(12)),
+                  child: Text(
+                    'No songs found. Scan your phone to load your music.',
+                    style: TextStyle(color: _OneMusicColors.secondary(context)),
+                  ),
+                ),
+              )
+            else
+              SliverPadding(
+                padding: EdgeInsets.symmetric(
+                  horizontal: r.value(mobile: 0, tablet: 4, desktop: 8),
+                ),
+                sliver: SliverList.builder(
+                  itemCount: tracks.length,
+                  itemBuilder: (context, index) {
+                    return _HomeTrackTile(
+                      track: tracks[index],
+                      controller: audioLibrary,
+                    );
+                  },
                 ),
               ),
 
-              if (tracks.isEmpty)
-                SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: _EmptyMusicState(onScan: audioLibrary.scanDeviceMusic),
-                )
-              else
-                SliverPadding(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: r.horizontalPadding,
-                  ),
-                  sliver: SliverList.builder(
-                    itemCount: tracks.length,
-                    itemBuilder: (context, index) {
-                      return _StudioTrackTile(
-                        track: tracks[index],
-                        controller: audioLibrary,
-                      );
-                    },
-                  ),
-                ),
-
-              const SliverToBoxAdapter(child: SizedBox(height: 24)),
-            ],
-          );
-        },
-      ),
+            SliverToBoxAdapter(
+              child: SizedBox(
+                height: r.value(mobile: 28, tablet: 34, desktop: 40),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
 
-class _SectionTitle extends StatelessWidget {
-  const _SectionTitle({
-    required this.title,
-    required this.action,
-    required this.onTap,
-  });
+// ============================================================================
+// SECTION HEADER
+// ============================================================================
+
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({required this.title, required this.onPressed});
 
   final String title;
-  final String action;
-  final VoidCallback onTap;
+  final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
-    final r = context.responsive;
-
     return Row(
       children: [
         Text(
           title,
           style: TextStyle(
-            color: _StudioColors.text(context),
-            fontSize: r.font(19),
-            fontWeight: FontWeight.w900,
-            letterSpacing: -0.4,
+            color: _OneMusicColors.textPrimary(context),
+            fontSize: 17,
+            fontWeight: FontWeight.w700,
+            letterSpacing: -0.2,
           ),
         ),
+
         const Spacer(),
+
         GestureDetector(
-          onTap: onTap,
-          child: Row(
-            children: [
-              Text(
-                action,
-                style: TextStyle(
-                  color: _StudioColors.accent(context),
-                  fontSize: r.font(12.5),
-                  fontWeight: FontWeight.w800,
-                ),
+          onTap: onPressed,
+          behavior: HitTestBehavior.opaque,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 4),
+            child: Text(
+              'See more',
+              style: TextStyle(
+                color: _OneMusicColors.accent(context),
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
               ),
-              const SizedBox(width: 3),
-              Icon(
-                Icons.arrow_forward_rounded,
-                size: r.icon(16),
-                color: _StudioColors.accent(context),
-              ),
-            ],
+            ),
           ),
         ),
       ],
@@ -569,11 +819,11 @@ class _SectionTitle extends StatelessWidget {
 }
 
 // ============================================================================
-// RECENT CARD
+// RECENTLY PLAYED CARD
 // ============================================================================
 
-class _RecentArtworkCard extends StatelessWidget {
-  const _RecentArtworkCard({required this.track, required this.controller});
+class _RecentlyPlayedCard extends StatelessWidget {
+  const _RecentlyPlayedCard({required this.track, required this.controller});
 
   final AudioTrack track;
   final AudioLibraryController controller;
@@ -581,151 +831,116 @@ class _RecentArtworkCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final r = context.responsive;
-    final width = r.value(mobile: 136, tablet: 150, desktop: 166);
-    final selected = controller.currentTrack?.path == track.path;
-    final playing = selected && controller.isPlaying;
+    final isSelected = controller.currentTrack?.path == track.path;
+    final isPlaying = isSelected && controller.isPlaying;
+
+    final cardWidth = r.value(mobile: 136, tablet: 154, desktop: 174);
+
+    final artworkSize = cardWidth;
 
     return SizedBox(
-      width: width,
+      width: cardWidth,
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          splashColor: _StudioColors.accent(context).withValues(alpha: 0.10),
-          highlightColor: _StudioColors.accent(context).withValues(alpha: 0.04),
-          onTap: () async {
-            if (controller.currentTrack?.path == track.path) {
-              await controller.togglePlayback();
-            } else {
-              await controller.playTrack(track, source: TrackSource.library);
-            }
+          onTap: () {
+            controller.playTrack(track, source: TrackSource.library);
           },
-          onLongPress: () =>
-              TrackActions.show(context, controller: controller, track: track),
-          child: Padding(
-            padding: const EdgeInsets.all(3),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                AspectRatio(
-                  aspectRatio: 1,
+          onLongPress: () {
+            TrackActions.show(context, controller: controller, track: track);
+          },
+          borderRadius: BorderRadius.circular(r.radius(17)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: artworkSize,
+                height: artworkSize,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(r.radius(17)),
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(16),
-                        child: TrackArtworkPreview(
-                          title: track.name,
-                          artwork: controller.artworkFor(track),
-                          size: width,
+                      TrackArtworkPreview(
+                        title: track.name,
+                        artwork: controller.artworkFor(track),
+                        size: artworkSize,
+                      ),
+
+                      Positioned.fill(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Colors.transparent,
+                                Colors.black.withValues(alpha: 0.20),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
+
                       Positioned(
-                        right: 8,
-                        bottom: 8,
+                        right: r.scale(7),
+                        bottom: r.scale(7),
                         child: Container(
-                          width: 34,
-                          height: 34,
+                          width: r.scale(34),
+                          height: r.scale(34),
                           decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.surface
-                                .withValues(alpha: 0.94),
+                            color: isPlaying
+                                ? _OneMusicColors.accent(context)
+                                : Colors.white.withValues(alpha: 0.94),
                             shape: BoxShape.circle,
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.12),
-                                blurRadius: 8,
-                                offset: const Offset(0, 2),
+                                color: Colors.black.withValues(alpha: 0.18),
+                                blurRadius: r.scale(10),
+                                offset: Offset(0, r.scale(3)),
                               ),
                             ],
                           ),
                           child: Icon(
-                            playing
+                            isPlaying
                                 ? Icons.pause_rounded
                                 : Icons.play_arrow_rounded,
-                            color: _StudioColors.accent(context),
-                            size: 19,
+                            color: isPlaying
+                                ? Colors.white
+                                : _OneMusicColors.accent(context),
+                            size: r.icon(19),
                           ),
                         ),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 9),
-                Text(
-                  track.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: _StudioColors.text(context),
-                    fontSize: r.font(13),
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  track.artist.trim().isEmpty ? 'Unknown artist' : track.artist,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: _StudioColors.secondary(context),
-                    fontSize: r.font(11.5),
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
+              ),
 
-// ============================================================================
-// SHUFFLE
-// ============================================================================
+              SizedBox(height: r.scale(9)),
 
-class _ShuffleButton extends StatelessWidget {
-  const _ShuffleButton({required this.controller});
-
-  final AudioLibraryController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    final r = context.responsive;
-    final accent = _StudioColors.accent(context);
-    final enabled = controller.shuffleEnabled;
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(24),
-        onTap: () => controller.toggleShuffle(!enabled),
-        splashColor: accent.withValues(alpha: 0.08),
-        highlightColor: accent.withValues(alpha: 0.04),
-        child: Container(
-          padding: EdgeInsets.symmetric(
-            horizontal: r.value(mobile: 14, tablet: 16, desktop: 18),
-            vertical: r.value(mobile: 9, tablet: 10, desktop: 11),
-          ),
-          decoration: BoxDecoration(
-            color: accent.withValues(alpha: enabled ? 0.11 : 0.06),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-              color: accent.withValues(alpha: enabled ? 0.18 : 0.10),
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.shuffle_rounded, size: r.icon(17), color: accent),
-              const SizedBox(width: 6),
               Text(
-                enabled ? 'Shuffle on' : 'Shuffle',
+                track.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  color: accent,
-                  fontSize: r.font(12.5),
-                  fontWeight: FontWeight.w800,
+                  color: _OneMusicColors.textPrimary(context),
+                  fontSize: r.font(13),
+                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                  letterSpacing: -0.15,
+                ),
+              ),
+
+              SizedBox(height: r.scale(3)),
+
+              Text(
+                track.artist.trim().isEmpty ? 'Unknown' : track.artist.trim(),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: _OneMusicColors.secondary(context),
+                  fontSize: r.font(11.5),
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ],
@@ -739,80 +954,166 @@ class _ShuffleButton extends StatelessWidget {
 // ============================================================================
 // TRACK ROW
 // ============================================================================
-
-class _StudioTrackTile extends StatelessWidget {
-  const _StudioTrackTile({required this.track, required this.controller});
+class _HomeTrackTile extends StatelessWidget {
+  const _HomeTrackTile({required this.track, required this.controller});
 
   final AudioTrack track;
   final AudioLibraryController controller;
 
   Future<void> _showTrackMenu(BuildContext context) async {
     final renderObject = context.findRenderObject();
+
     if (renderObject is! RenderBox) return;
 
     final overlay = Overlay.of(context).context.findRenderObject();
+
     if (overlay is! RenderBox) return;
 
     final position = renderObject.localToGlobal(Offset.zero, ancestor: overlay);
-    final size = renderObject.size;
-    final screen = MediaQuery.sizeOf(context);
 
-    const menuWidth = 230.0;
+    final size = renderObject.size;
+
+    final screenSize = MediaQuery.sizeOf(context);
+
+    final menuWidth = 230.0;
     const menuHeight = 190.0;
 
-    var left = position.dx + size.width - menuWidth;
-    left = left.clamp(12.0, screen.width - menuWidth - 12.0);
+    double left = position.dx + size.width - menuWidth;
 
-    var top = position.dy + size.height * 0.5;
-    if (top + menuHeight > screen.height - 20) {
-      top = screen.height - menuHeight - 20;
+    if (left < 12) {
+      left = 12;
     }
-    if (top < 20) top = 20;
+
+    if (left + menuWidth > screenSize.width - 12) {
+      left = screenSize.width - menuWidth - 12;
+    }
+
+    double top = position.dy + size.height * 0.5;
+
+    // Keep the popup on screen.
+    if (top + menuHeight > screenSize.height - 20) {
+      top = screenSize.height - menuHeight - 20;
+    }
+
+    if (top < 20) {
+      top = 20;
+    }
 
     final selected = await showMenu<String>(
       context: context,
       position: RelativeRect.fromLTRB(
         left,
         top,
-        screen.width - left - menuWidth,
-        screen.height - top - menuHeight,
+        screenSize.width - left - menuWidth,
+        screenSize.height - top - menuHeight,
       ),
-      color: _StudioColors.panel(context),
-      elevation: 14,
+      color: _OneMusicColors.surface(context),
+      elevation: 12,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       items: [
-        _menuItem(
+        PopupMenuItem<String>(
           value: 'playlist',
-          icon: Icons.playlist_add_rounded,
-          label: 'Add to playlist',
-          context: context,
+          height: 48,
+          child: Row(
+            children: [
+              Icon(
+                Icons.playlist_add_rounded,
+                size: 20,
+                color: _OneMusicColors.textPrimary(context),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                'Add to playlist',
+                style: TextStyle(
+                  color: _OneMusicColors.textPrimary(context),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
         ),
-        _menuItem(
+
+        PopupMenuItem<String>(
           value: 'favorite',
-          icon: controller.isFavorite(track)
-              ? Icons.favorite_rounded
-              : Icons.favorite_border_rounded,
-          label: controller.isFavorite(track)
-              ? 'Remove from favorites'
-              : 'Add to favorites',
-          context: context,
+          height: 48,
+          child: Row(
+            children: [
+              Icon(
+                controller.isFavorite(track)
+                    ? Icons.favorite_rounded
+                    : Icons.favorite_border_rounded,
+                size: 20,
+                color: controller.isFavorite(track)
+                    ? _OneMusicColors.accent(context)
+                    : _OneMusicColors.textPrimary(context),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                controller.isFavorite(track)
+                    ? 'Remove from favorites'
+                    : 'Add to favorites',
+                style: TextStyle(
+                  color: _OneMusicColors.textPrimary(context),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
         ),
-        _menuItem(
+
+        PopupMenuItem<String>(
           value: 'play',
-          icon: Icons.play_arrow_rounded,
-          label: 'Play now',
-          context: context,
+          height: 48,
+          child: Row(
+            children: [
+              Icon(
+                Icons.play_arrow_rounded,
+                size: 20,
+                color: _OneMusicColors.textPrimary(context),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                'Play now',
+                style: TextStyle(
+                  color: _OneMusicColors.textPrimary(context),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
         ),
-        _menuItem(
+
+        PopupMenuItem<String>(
           value: 'remove',
-          icon: Icons.remove_circle_outline_rounded,
-          label: 'Remove from library',
-          context: context,
+          height: 48,
+          child: Row(
+            children: [
+              Icon(
+                Icons.remove_circle_outline_rounded,
+                size: 20,
+                color: _OneMusicColors.accent(context),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                'Remove from library',
+                style: TextStyle(
+                  color: _OneMusicColors.textPrimary(context),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
         ),
       ],
     );
 
-    if (!context.mounted || selected == null) return;
+    if (!context.mounted || selected == null) {
+      return;
+    }
 
     switch (selected) {
       case 'playlist':
@@ -822,52 +1123,29 @@ class _StudioTrackTile extends StatelessWidget {
           track: track,
         );
         break;
+
       case 'favorite':
         controller.toggleFavorite(track);
         break;
+
       case 'play':
         await controller.playTrack(track, source: TrackSource.library);
         break;
+
       case 'remove':
         controller.removeTrack(track);
         break;
     }
   }
 
-  PopupMenuItem<String> _menuItem({
-    required String value,
-    required IconData icon,
-    required String label,
-    required BuildContext context,
-  }) {
-    return PopupMenuItem<String>(
-      value: value,
-      height: 48,
-      child: Row(
-        children: [
-          Icon(icon, size: 20, color: _StudioColors.text(context)),
-          const SizedBox(width: 12),
-          Text(
-            label,
-            style: TextStyle(
-              color: _StudioColors.text(context),
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final r = context.responsive;
-    final selected = controller.currentTrack?.path == track.path;
-    final playing = selected && controller.isPlaying;
+    final isSelected = controller.currentTrack?.path == track.path;
+    final isPlaying = isSelected && controller.isPlaying;
 
     final artist = track.artist.trim().isEmpty
-        ? 'Unknown artist'
+        ? 'Unknown'
         : track.artist.trim();
 
     return Padding(
@@ -877,57 +1155,37 @@ class _StudioTrackTile extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          splashColor: _StudioColors.accent(context).withValues(alpha: 0.10),
-          highlightColor: _StudioColors.accent(context).withValues(alpha: 0.04),
           onTap: () async {
-            if (controller.currentTrack?.path == track.path) {
-              await controller.togglePlayback();
-            } else {
-              await controller.playTrack(track, source: TrackSource.library);
-            }
+            await controller.playTrack(track, source: TrackSource.library);
           },
-          onLongPress: () => _showTrackMenu(context),
-          child: Padding(
+          onLongPress: () {
+            _showTrackMenu(context);
+          },
+          borderRadius: BorderRadius.circular(r.radius(20)),
+          child: Container(
             padding: EdgeInsets.symmetric(
-              vertical: r.value(mobile: 7, tablet: 9, desktop: 10),
+              horizontal: r.value(mobile: 4, tablet: 6, desktop: 8),
+              vertical: r.value(mobile: 7, tablet: 8, desktop: 9),
+            ),
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? _OneMusicColors.accent(context).withValues(alpha: 0.020)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(r.radius(20)),
             ),
             child: Row(
               children: [
-                Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    Positioned(
-                      left: 6,
-                      right: 6,
-                      bottom: -2,
-                      height: 14,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(13),
-                          boxShadow: [
-                            BoxShadow(
-                              color: _StudioColors.accent(context)
-                                  .withValues(alpha: 0.16),
-                              blurRadius: 18,
-                              spreadRadius: 1,
-                              offset: const Offset(0, 5),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(13),
-                      child: TrackArtworkPreview(
-                        title: track.name,
-                        artwork: controller.artworkFor(track),
-                        size: r.value(mobile: 54, tablet: 60, desktop: 64),
-                      ),
-                    ),
-                  ],
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(r.radius(12)),
+                  child: TrackArtworkPreview(
+                    title: track.name,
+                    artwork: controller.artworkFor(track),
+                    size: r.value(mobile: 52, tablet: 62, desktop: 68),
+                  ),
                 ),
-                SizedBox(width: r.scale(13)),
+
+                SizedBox(width: r.value(mobile: 13, tablet: 15, desktop: 17)),
+
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -937,182 +1195,65 @@ class _StudioTrackTile extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          color: selected
-                              ? _StudioColors.accent(context)
-                              : _StudioColors.text(context),
-                          fontSize: r.font(14.2),
-                          fontWeight: FontWeight.w800,
+                          color: _OneMusicColors.textPrimary(context),
+                          fontSize: r.font(14.5),
+                          fontWeight: isSelected
+                              ? FontWeight.w700
+                              : FontWeight.w600,
+                          letterSpacing: -0.18,
+                          height: 1.15,
                         ),
                       ),
-                      const SizedBox(height: 4),
+
+                      SizedBox(height: r.scale(4)),
+
                       Text(
                         artist,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          color: _StudioColors.secondary(context),
-                          fontSize: r.font(11.5),
+                          color: _OneMusicColors.secondary(context),
+                          fontSize: r.font(12),
                           fontWeight: FontWeight.w500,
+                          height: 1.1,
                         ),
                       ),
                     ],
                   ),
                 ),
-                if (playing)
+
+                SizedBox(width: r.scale(8)),
+
+                if (isPlaying)
                   Padding(
-                    padding: EdgeInsets.only(right: r.scale(12)),
-                    child: _AnimatedEqualizer(
-                      key: const ValueKey('playing'),
-                      color: _StudioColors.accent(context),
-                    ),
+                    padding: EdgeInsets.only(right: r.scale(10)),
+                    child: NowPlayingIndicator(key: const ValueKey('playing')),
                   ),
+
                 IconButton(
                   tooltip: 'More',
                   visualDensity: const VisualDensity(
                     horizontal: -2,
                     vertical: -2,
                   ),
-                  splashRadius: r.scale(18),
+                  splashRadius: r.scale(19),
+                  padding: EdgeInsets.zero,
+                  constraints: BoxConstraints(
+                    minWidth: r.value(mobile: 34, tablet: 38, desktop: 40),
+                    minHeight: r.value(mobile: 34, tablet: 38, desktop: 40),
+                  ),
                   icon: Icon(
                     Icons.more_horiz_rounded,
-                    size: r.icon(21),
-                    color: _StudioColors.secondary(context),
+                    size: r.icon(22),
+                    color: _OneMusicColors.secondary(context),
                   ),
-                  onPressed: () => _showTrackMenu(context),
+                  onPressed: () {
+                    _showTrackMenu(context);
+                  },
                 ),
               ],
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-// ============================================================================
-// ACTUAL ANIMATED EQUALIZER
-// ============================================================================
-
-class _AnimatedEqualizer extends StatefulWidget {
-  const _AnimatedEqualizer({super.key, required this.color});
-
-  final Color color;
-
-  @override
-  State<_AnimatedEqualizer> createState() => _AnimatedEqualizerState();
-}
-
-class _AnimatedEqualizerState extends State<_AnimatedEqualizer>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 620),
-    )..repeat(reverse: true);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 22,
-      height: 22,
-      child: AnimatedBuilder(
-        animation: _controller,
-        builder: (context, child) {
-          final t = Curves.easeInOut.transform(_controller.value);
-          final heights = <double>[
-            7 + 9 * t,
-            14 - 6 * t,
-            9 + 10 * t,
-            16 - 8 * t,
-          ];
-
-          return Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              for (var i = 0; i < heights.length; i++)
-                Padding(
-                  padding: EdgeInsets.only(left: i == 0 ? 0 : 2.0),
-                  child: Container(
-                    width: 3,
-                    height: heights[i],
-                    decoration: BoxDecoration(
-                      color: widget.color,
-                      borderRadius: BorderRadius.circular(3),
-                    ),
-                  ),
-                ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-}
-
-// ============================================================================
-// EMPTY STATE
-// ============================================================================
-
-class _EmptyMusicState extends StatelessWidget {
-  const _EmptyMusicState({required this.onScan});
-
-  final Future<void> Function() onScan;
-
-  @override
-  Widget build(BuildContext context) {
-    final accent = _StudioColors.accent(context);
-
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(30),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.music_off_rounded,
-              size: 42,
-              color: _StudioColors.muted(context),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              'Your library is empty',
-              style: TextStyle(
-                color: _StudioColors.text(context),
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'Scan your device to find your music.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: _StudioColors.secondary(context),
-                fontSize: 12.5,
-              ),
-            ),
-            const SizedBox(height: 18),
-            TextButton.icon(
-              onPressed: onScan,
-              icon: Icon(Icons.refresh_rounded, color: accent),
-              label: Text(
-                'Scan music',
-                style: TextStyle(color: accent, fontWeight: FontWeight.w800),
-              ),
-            ),
-          ],
         ),
       ),
     );
@@ -1130,18 +1271,12 @@ class _RecentlyPlayedPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final r = context.responsive;
-
     return Scaffold(
-      backgroundColor: _StudioColors.background(context),
+      backgroundColor: _OneMusicColors.background(context),
       appBar: AppBar(
         backgroundColor: Colors.transparent,
-        surfaceTintColor: Colors.transparent,
         elevation: 0,
-        title: const Text(
-          'Recently played',
-          style: TextStyle(fontWeight: FontWeight.w800),
-        ),
+        title: const Text('Recently played'),
       ),
       bottomNavigationBar: PlayerBar(
         controller: audioLibrary,
@@ -1151,37 +1286,250 @@ class _RecentlyPlayedPage extends StatelessWidget {
           }
         },
       ),
-      body: ListenableBuilder(
-        listenable: audioLibrary,
-        builder: (context, _) {
-          final recent = audioLibrary.recentlyPlayed;
+      body: GlassBackground(
+        accentListenable: audioLibrary,
+        accentProvider: () => audioLibrary.nowPlayingAccent,
+        child: ListenableBuilder(
+          listenable: audioLibrary,
+          builder: (context, child) {
+            final recentlyPlayed = audioLibrary.recentlyPlayed;
 
-          if (recent.isEmpty) {
-            return Center(
-              child: Text(
-                'No recently played songs yet.',
-                style: TextStyle(color: _StudioColors.secondary(context)),
-              ),
-            );
-          }
-
-          return ListView.builder(
-            physics: const BouncingScrollPhysics(),
-            padding: EdgeInsets.fromLTRB(
-              r.horizontalPadding,
-              12,
-              r.horizontalPadding,
-              30,
-            ),
-            itemCount: recent.length,
-            itemBuilder: (context, index) {
-              return _StudioTrackTile(
-                track: recent[index],
-                controller: audioLibrary,
+            if (recentlyPlayed.isEmpty) {
+              return Center(
+                child: Text(
+                  'No recently played songs yet.',
+                  style: TextStyle(color: _OneMusicColors.secondary(context)),
+                ),
               );
-            },
-          );
-        },
+            }
+
+            return ListView.builder(
+              padding: const EdgeInsets.fromLTRB(20, 10, 20, 30),
+              itemCount: recentlyPlayed.length,
+              itemBuilder: (context, index) {
+                return _HomeTrackTile(
+                  track: recentlyPlayed[index],
+                  controller: audioLibrary,
+                );
+              },
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// SEARCH PAGE
+// ============================================================================
+
+class _SearchPage extends StatefulWidget {
+  const _SearchPage({required this.audioLibrary});
+
+  final AudioLibraryController audioLibrary;
+
+  @override
+  State<_SearchPage> createState() => _SearchPageState();
+}
+
+class _SearchPageState extends State<_SearchPage> {
+  final TextEditingController _controller = TextEditingController();
+
+  String _query = '';
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: _OneMusicColors.background(context),
+      body: GlassBackground(
+        accentListenable: widget.audioLibrary,
+        accentProvider: () => widget.audioLibrary.nowPlayingAccent,
+        child: SafeArea(
+          child: Column(
+            children: [
+              // ===========================================================
+              // SEARCH HEADER
+              // ===========================================================
+
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 4, 18, 14),
+                child: Row(
+                  children: [
+                    IconButton(
+                      tooltip: 'Back',
+                      splashRadius: 22,
+                      icon: Icon(
+                        Icons.arrow_back_ios_new_rounded,
+                        size: 19,
+                        color: _OneMusicColors.textPrimary(context),
+                      ),
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
+
+                    const SizedBox(width: 5),
+
+                    Expanded(
+                      child: Container(
+                        height: 46,
+                        decoration: BoxDecoration(
+                          color: _OneMusicColors.surface(context)
+                              .withValues(alpha: 0.72),
+                          borderRadius: BorderRadius.circular(15),
+                        ),
+                        child: TextField(
+                          controller: _controller,
+                          autofocus: true,
+                          onChanged: (value) {
+                            setState(() {
+                              _query = value;
+                            });
+                          },
+                          style: TextStyle(
+                            color: _OneMusicColors.textPrimary(context),
+                            fontSize: 14,
+                          ),
+                          decoration: InputDecoration(
+                            border: InputBorder.none,
+                            hintText: 'Search songs...',
+                            hintStyle: TextStyle(
+                              color: _OneMusicColors.muted(context),
+                            ),
+                            prefixIcon: Icon(
+                              Icons.search_rounded,
+                              size: 21,
+                              color: _OneMusicColors.secondary(context),
+                            ),
+                            suffixIcon: _query.isEmpty
+                                ? null
+                                : IconButton(
+                                    icon: Icon(
+                                      Icons.close_rounded,
+                                      size: 19,
+                                      color: _OneMusicColors.secondary(context),
+                                    ),
+                                    onPressed: () {
+                                      _controller.clear();
+
+                                      setState(() {
+                                        _query = '';
+                                      });
+                                    },
+                                  ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // ===========================================================
+              // RESULTS
+              // ===========================================================
+              Expanded(
+                child: ListenableBuilder(
+                  listenable: widget.audioLibrary,
+                  builder: (context, child) {
+                    final query = _query.trim().toLowerCase();
+
+                    if (query.isEmpty) {
+                      return const _SearchEmptyState(
+                        icon: Icons.search_rounded,
+                        title: 'Search your music',
+                        subtitle: 'Find songs in your local library',
+                      );
+                    }
+
+                    final results = widget.audioLibrary.tracks
+                        .where(
+                          (track) => track.name.toLowerCase().contains(query),
+                        )
+                        .toList();
+
+                    if (results.isEmpty) {
+                      return const _SearchEmptyState(
+                        icon: Icons.search_off_rounded,
+                        title: 'No songs found',
+                        subtitle: 'Try another search',
+                      );
+                    }
+
+                    return ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(20, 2, 20, 30),
+                      itemCount: results.length,
+                      itemBuilder: (context, index) {
+                        return _HomeTrackTile(
+                          track: results[index],
+                          controller: widget.audioLibrary,
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// SEARCH EMPTY STATE
+// ============================================================================
+
+class _SearchEmptyState extends StatelessWidget {
+  const _SearchEmptyState({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 30),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 40, color: _OneMusicColors.muted(context)),
+
+            const SizedBox(height: 14),
+
+            Text(
+              title,
+              style: TextStyle(
+                color: _OneMusicColors.textPrimary(context),
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+
+            const SizedBox(height: 5),
+
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: _OneMusicColors.secondary(context),
+                fontSize: 12.5,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

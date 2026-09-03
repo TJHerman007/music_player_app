@@ -7,10 +7,7 @@ import 'audio_processor.dart';
 /// No fixed light/dark colors are used here: Theme.of(context) supplies the
 /// current app palette and now-playing accent.
 class AudioEffectsSheet extends StatelessWidget {
-  const AudioEffectsSheet({
-    super.key,
-    required this.processor,
-  });
+  const AudioEffectsSheet({super.key, required this.processor});
 
   final AudioProcessor processor;
 
@@ -35,9 +32,7 @@ class AudioEffectsSheet extends StatelessWidget {
     return SafeArea(
       child: Material(
         color: scheme.surface,
-        borderRadius: const BorderRadius.vertical(
-          top: Radius.circular(28),
-        ),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
         clipBehavior: Clip.antiAlias,
         child: ListenableBuilder(
           listenable: processor,
@@ -55,7 +50,7 @@ class AudioEffectsSheet extends StatelessWidget {
                       width: 40,
                       height: 4,
                       decoration: BoxDecoration(
-                        color: scheme.onSurface.withOpacity(.16),
+                        color: scheme.onSurface.withValues(alpha: .16),
                         borderRadius: BorderRadius.circular(20),
                       ),
                     ),
@@ -83,7 +78,7 @@ class AudioEffectsSheet extends StatelessWidget {
                   Text(
                     'Fine-tune the sound without changing your library.',
                     style: theme.textTheme.bodyMedium?.copyWith(
-                      color: scheme.onSurface.withOpacity(.55),
+                      color: scheme.onSurface.withValues(alpha: .55),
                     ),
                   ),
 
@@ -104,9 +99,7 @@ class AudioEffectsSheet extends StatelessWidget {
                     onChanged: effects.setSpeed,
                   ),
 
-                  _ScaleLabels(
-                    labels: const ['0.50×', '1.00×', '2.00×'],
-                  ),
+                  _ScaleLabels(labels: const ['0.50×', '1.00×', '2.00×']),
 
                   const SizedBox(height: 28),
 
@@ -127,9 +120,7 @@ class AudioEffectsSheet extends StatelessWidget {
                     onChanged: effects.setPitch,
                   ),
 
-                  _ScaleLabels(
-                    labels: const ['−12', '0', '+12'],
-                  ),
+                  _ScaleLabels(labels: const ['−12', '0', '+12']),
 
                   const SizedBox(height: 22),
 
@@ -173,7 +164,7 @@ class AudioEffectsSheet extends StatelessWidget {
                       child: Text(
                         'Karaoke is using a cached processed version.',
                         style: theme.textTheme.bodySmall?.copyWith(
-                          color: scheme.onSurface.withOpacity(.52),
+                          color: scheme.onSurface.withValues(alpha: .52),
                         ),
                       ),
                     ),
@@ -209,10 +200,7 @@ class _SectionTitle extends StatelessWidget {
         Expanded(
           child: Text(
             title,
-            style: const TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w700,
-            ),
+            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
           ),
         ),
         Text(
@@ -237,7 +225,7 @@ class _ScaleLabels extends StatelessWidget {
   Widget build(BuildContext context) {
     final style = TextStyle(
       fontSize: 10.5,
-      color: Theme.of(context).colorScheme.onSurface.withOpacity(.45),
+      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: .45),
     );
 
     return Row(
@@ -284,7 +272,7 @@ class _EffectTile extends StatelessWidget {
                 width: 43,
                 height: 43,
                 decoration: BoxDecoration(
-                  color: scheme.primary.withOpacity(.10),
+                  color: scheme.primary.withValues(alpha: .10),
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: Icon(icon, size: 21),
@@ -306,16 +294,13 @@ class _EffectTile extends StatelessWidget {
                       subtitle,
                       style: TextStyle(
                         fontSize: 11.5,
-                        color: scheme.onSurface.withOpacity(.52),
+                        color: scheme.onSurface.withValues(alpha: .52),
                       ),
                     ),
                   ],
                 ),
               ),
-              Switch.adaptive(
-                value: value,
-                onChanged: onChanged,
-              ),
+              Switch.adaptive(value: value, onChanged: onChanged),
             ],
           ),
         ),

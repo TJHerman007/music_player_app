@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 /// Lightweight animated sine progress visualizer.
@@ -47,7 +48,7 @@ class _SineProgressVisualizerState extends State<SineProgressVisualizer>
     return RepaintBoundary(
       child: AnimatedBuilder(
         animation: _controller,
-        builder: (_, __) {
+        builder: (_, _) {
           return CustomPaint(
             painter: _SinePainter(
               progress: widget.progress.clamp(0.0, 1.0),
@@ -103,9 +104,9 @@ class _SinePainter extends CustomPainter {
 
     for (var i = 0; i <= points; i++) {
       final x = size.width * i / points;
-      final y = center +
-          math.sin((x / size.width) * cycles * math.pi * 2 + phase) *
-              amplitude;
+      final y =
+          center +
+          math.sin((x / size.width) * cycles * math.pi * 2 + phase) * amplitude;
 
       if (i == 0) {
         basePath.moveTo(x, y);
@@ -122,12 +123,7 @@ class _SinePainter extends CustomPainter {
 
     if (progress > 0) {
       canvas.save();
-      canvas.clipRect(Rect.fromLTWH(
-        0,
-        0,
-        size.width * progress,
-        size.height,
-      ));
+      canvas.clipRect(Rect.fromLTWH(0, 0, size.width * progress, size.height));
       canvas.drawPath(basePath, activePaint);
       canvas.restore();
     }

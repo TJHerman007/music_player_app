@@ -84,14 +84,8 @@ Java_com_example_music_1player_app_KaraokeNative_nativeSetEq(
 /*
  * Native PCM bridge.
  *
- * IMPORTANT:
- * This version intentionally performs NO audio processing.
- *
- * It only copies the decoded PCM from the Java input buffer
- * into the Java output buffer.
- *
- * This lets us verify that the JNI ByteBuffer bridge itself
- * is working before enabling the C++ DSP engine.
+ * This is the point where the decoded PCM from the custom just_audio
+ * engine is passed through TIUS' native DSP chain.
  */
 extern "C"
 JNIEXPORT void JNICALL
@@ -122,16 +116,21 @@ Java_com_ryanheise_just_1audio_NativeAudioEngine_process(
         return;
     }
 
-    const std::size_t byteCount =
+    const std::size_t sampleCount =
         static_cast<std::size_t>(frames) *
-        static_cast<std::size_t>(channels) *
-        sizeof(int16_t);
+        static_cast<std::size_t>(channels);
 
-    std::memcpy(
-        outputAddress,
-        inputAddress,
-        byteCount
-    );
+    const std::size_t byteCount =
+        sampleCount * sizeof(int16_t);
 
-    (void)sampleRate;
+    // Copy first so input and output buffers can safely alias or differ.
+    if (inputAddress != outputAddress) {
+        std::memcpy(outputAddress, inputAddress, byteCount);
+    }
+
+    g_engine.process(
+        static_cast<int16_t*>(outputAddress),
+        static_cast<std::size_t>(frames),
+        static_cast<int>(channels),
+        static_cast<int>(sampleRate));
 }

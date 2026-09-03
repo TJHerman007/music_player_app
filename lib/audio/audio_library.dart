@@ -94,6 +94,7 @@ enum AudioRepeatMode { off, all, one }
 class AudioLibraryController extends ChangeNotifier {
   AudioLibraryController({this._preferences, Future<void>? backgroundReady})
     : _backgroundReady = backgroundReady ?? Future<void>.value() {
+    audioEngine.setPlaybackSpeedHandler(player.setSpeed);
     _deviceAudioChannel.setMethodCallHandler(_handleDeviceAudioEvent);
     unawaited(_backgroundReady);
     unawaited(ready);
@@ -1010,88 +1011,32 @@ class AudioLibraryController extends ChangeNotifier {
   }
 
   void setPitch(double value) {
-    audioEngine.effects.setPitch(value);
-    unawaited(_sendPitchToNative(audioEngine.effects.pitchSemitones));
+    unawaited(audioEngine.setPitch(value));
     notifyListeners();
   }
 
-  Future<void> _sendPitchToNative(double value) async {
-    try {
-      await audioBridge.setPitch(value);
-    } catch (error, stackTrace) {
-      debugPrint('AudioEngine setPitch failed: $error');
-      debugPrintStack(stackTrace: stackTrace);
-    }
-  }
-
   void setEq(List<double> bands) {
-    audioEngine.effects.setEq(bands);
-    unawaited(_sendEqToNative(audioEngine.effects.eq));
+    unawaited(audioEngine.setEq(bands));
     notifyListeners();
   }
 
   void setEqBand(int index, double db) {
-    audioEngine.effects.setEqBand(index, db);
-    unawaited(_sendEqToNative(audioEngine.effects.eq));
+    unawaited(audioEngine.setEqBand(index, db));
     notifyListeners();
-  }
-
-  Future<void> _sendEqToNative(List<double> bands) async {
-    try {
-      await audioBridge.setEq(bands);
-    } catch (error, stackTrace) {
-      debugPrint('AudioEngine setEq failed: $error');
-      debugPrintStack(stackTrace: stackTrace);
-    }
   }
 
   void setKaraoke(bool enabled) {
-    audioEngine.setKaraokeEnabled(enabled);
-    unawaited(_sendKaraokeToNative(enabled ? 1.0 : 0.0));
+    unawaited(audioEngine.setKaraokeEnabled(enabled));
     notifyListeners();
-  }
-
-  Future<void> _sendKaraokeToNative(double amount) async {
-    try {
-      await audioBridge.setKaraoke(amount);
-    } catch (error, stackTrace) {
-      debugPrint('AudioEngine setKaraoke failed: $error');
-      debugPrintStack(stackTrace: stackTrace);
-    }
   }
 
   void setSpatial(bool enabled, double depth) {
-    audioEngine.setSpatialEnabled(enabled);
-    audioEngine.setSpatialDepth(depth);
-
-    unawaited(_sendSpatialToNative(enabled, audioEngine.spatialDepth));
-
+    unawaited(audioEngine.setSpatial(enabled, depth));
     notifyListeners();
   }
 
-  Future<void> _sendSpatialToNative(bool enabled, double depth) async {
-    try {
-      await audioBridge.setSpatial(enabled, depth);
-    } catch (error, stackTrace) {
-      debugPrint('AudioEngine setSpatial failed: $error');
-      debugPrintStack(stackTrace: stackTrace);
-    }
-  }
-
   void resetAudioEffects() {
-    audioEngine.reset();
-
-    unawaited(_sendSpeedToNative(audioEngine.effects.speed));
-    unawaited(_sendPitchToNative(audioEngine.effects.pitchSemitones));
-    unawaited(_sendEqToNative(audioEngine.effects.eq));
-    unawaited(_sendKaraokeToNative(audioEngine.karaokeEnabled ? 1.0 : 0.0));
-    unawaited(
-      _sendSpatialToNative(
-        audioEngine.spatialEnabled,
-        audioEngine.spatialDepth,
-      ),
-    );
-
+    unawaited(audioEngine.reset());
     notifyListeners();
   }
 
